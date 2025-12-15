@@ -1,26 +1,144 @@
 @import "tailwindcss";
 
+/* Default theme variables (Cyberpunk) */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Backgrounds */
+  --bgPrimary: #0a0014;
+  --bgSecondary: #1a0033;
+  --bgCard: #1a0033;
+  
+  /* Text */
+  --textPrimary: #ffffff;
+  --textSecondary: #a0a0a0;
+  
+  /* Accents */
+  --accent1: #00f0ff;
+  --accent2: #ff00ff;
+  --accent3: #8b00ff;
+  --accent4: #0066ff;
+  
+  /* Borders & Effects */
+  --borderColor: #00f0ff;
+  --glowIntensity: 20px;
+  --shadowIntensity: 0.6;
+  
+  /* Progress */
+  --progressFill: #00f0ff;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background: var(--bgPrimary);
+  --color-foreground: var(--textPrimary);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+body {
+  background: var(--bgPrimary);
+  color: var(--textPrimary);
+  font-family: Arial, Helvetica, sans-serif;
+  transition: background-color 0.4s ease, color 0.4s ease;
+}
+
+/* Smooth transitions for theme changes */
+* {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-duration: 0.3s;
+  transition-timing-function: ease;
+}
+
+/* Cyberpunk Animations */
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes glow {
+  0% {
+    box-shadow: 0 0 5px rgba(0, 240, 255, var(--shadowIntensity));
+  }
+  100% {
+    box-shadow: 0 0 var(--glowIntensity) rgba(0, 240, 255, var(--shadowIntensity));
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Bee Theme - Honey Fill Animation */
+@keyframes honeyFill {
+  0% { 
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  100% { 
+    transform: translateY(0%);
+    opacity: 1;
+  }
+}
+
+/* Bee Theme - Floating Pollen */
+@keyframes floatPollen {
+  0%, 100% { 
+    transform: translateY(0px) translateX(0px);
+    opacity: 0.6;
+  }
+  50% { 
+    transform: translateY(-20px) translateX(10px);
+    opacity: 1;
+  }
+}
+
+/* Bee Theme - Gentle Glow Pulse */
+@keyframes honeyGlow {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(255, 200, 61, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(255, 200, 61, 0.5);
+  }
+}
+
+/* Hex grid pattern utility (for cyberpunk) */
+.hex-grid {
+  background-image: 
+    linear-gradient(30deg, rgba(0, 240, 255, 0.13) 12%, transparent 12.5%, transparent 87%, rgba(0, 240, 255, 0.13) 87.5%),
+    linear-gradient(150deg, rgba(0, 240, 255, 0.13) 12%, transparent 12.5%, transparent 87%, rgba(0, 240, 255, 0.13) 87.5%),
+    linear-gradient(30deg, rgba(0, 240, 255, 0.13) 12%, transparent 12.5%, transparent 87%, rgba(0, 240, 255, 0.13) 87.5%),
+    linear-gradient(150deg, rgba(0, 240, 255, 0.13) 12%, transparent 12.5%, transparent 87%, rgba(0, 240, 255, 0.13) 87.5%);
+  background-size: 80px 140px;
+  background-position: 0 0, 0 0, 40px 70px, 40px 70px;
+}
+
+/* Honeycomb pattern utility (for bee theme) */
+.honeycomb-grid {
+  background-image: 
+    linear-gradient(30deg, rgba(255, 200, 61, 0.15) 12%, transparent 12.5%, transparent 87%, rgba(255, 200, 61, 0.15) 87.5%),
+    linear-gradient(150deg, rgba(255, 200, 61, 0.15) 12%, transparent 12.5%, transparent 87%, rgba(255, 200, 61, 0.15) 87.5%),
+    linear-gradient(30deg, rgba(255, 200, 61, 0.15) 12%, transparent 12.5%, transparent 87%, rgba(255, 200, 61, 0.15) 87.5%),
+    linear-gradient(150deg, rgba(255, 200, 61, 0.15) 12%, transparent 12.5%, transparent 87%, rgba(255, 200, 61, 0.15) 87.5%);
+  background-size: 80px 140px;
+  background-position: 0 0, 0 0, 40px 70px, 40px 70px;
+}
+
+/* Shape utilities based on theme */
+[data-shape="angular"] .themed-card {
+  border-radius: 0.25rem;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+
+[data-shape="rounded"] .themed-card {
+  border-radius: 1rem;
+}
+
+[data-shape="hexagonal"] .themed-card {
+  border-radius: 0.5rem;
+  position: relative;
+}
+
+[data-shape="hexagonal"] .themed-card::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  background: var(--borderColor);
+  clip-path: polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%);
+  z-index: -1;
+  opacity: 0.3;
 }
