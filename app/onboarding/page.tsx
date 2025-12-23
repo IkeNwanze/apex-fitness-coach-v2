@@ -7,6 +7,7 @@ import { useTheme } from '@/components/ThemeProvider'
 import { supabaseBrowser } from '@/lib/supabaseClient'
 
 type OnboardingStep = 1 | 2 | 3 | 4
+type TrainingLocation = 'home' | 'commercial' | 'outdoors' | 'apartment' | ''
 
 interface OnboardingData {
   full_name: string
@@ -14,8 +15,16 @@ interface OnboardingData {
   gender: string
   fitness_goal: string
   experience_level: string
+  training_location: TrainingLocation
+  gym_chain: string
+  gym_custom_name: string
   available_equipment: string[]
   workout_frequency: string
+}
+
+interface EquipmentCategory {
+  category: string
+  items: Array<{ name: string; emoji: string }>
 }
 
 export default function OnboardingPage() {
@@ -33,6 +42,9 @@ export default function OnboardingPage() {
     gender: '',
     fitness_goal: '',
     experience_level: '',
+    training_location: '',
+    gym_chain: '',
+    gym_custom_name: '',
     available_equipment: [],
     workout_frequency: '',
   })
@@ -83,12 +95,49 @@ export default function OnboardingPage() {
     if (currentStep > 1) {
       setCurrentStep((currentStep - 1) as OnboardingStep)
       setError(null)
+      
+      // Reset Step 4 substeps when leaving Step 4
+      if (currentStep === 4) {
+        setFormData(prev => ({
+          ...prev,
+          training_location: '',
+          gym_chain: '',
+          gym_custom_name: '',
+          available_equipment: [],
+          workout_frequency: '',
+        }))
+      }
     }
   }
 
   const handleSubmit = async () => {
     setLoading(true)
     setError(null)
+
+    // Validation for Step 4
+    if (!formData.training_location) {
+      setError('Where do you train? Pick one!')
+      setLoading(false)
+      return
+    }
+
+    if (formData.training_location === 'commercial' && !formData.gym_chain) {
+      setError('Which gym? Select one from the list!')
+      setLoading(false)
+      return
+    }
+
+    if (formData.gym_chain === 'Other Commercial Gym' && !formData.gym_custom_name) {
+      setError('What\'s the name of your gym?')
+      setLoading(false)
+      return
+    }
+
+    if (formData.training_location !== 'commercial' && formData.available_equipment.length === 0) {
+      setError('What equipment do you have? Pick at least one!')
+      setLoading(false)
+      return
+    }
 
     if (!formData.workout_frequency) {
       setError('How many days can you commit? Pick one!')
@@ -106,7 +155,10 @@ export default function OnboardingPage() {
           gender: formData.gender,
           fitness_goal: formData.fitness_goal,
           experience_level: formData.experience_level,
-          available_equipment: formData.available_equipment,
+          training_location: formData.training_location,
+          gym_chain: formData.gym_chain || null,
+          gym_custom_name: formData.gym_custom_name || null,
+          available_equipment: formData.training_location === 'commercial' ? [] : formData.available_equipment,
           workout_frequency: formData.workout_frequency,
           has_completed_onboarding: true,
         })
@@ -121,15 +173,96 @@ export default function OnboardingPage() {
     }
   }
 
-  const equipmentOptions = [
-    { name: 'Dumbbells', emoji: '💪' },
-    { name: 'Barbell', emoji: '🏋️' },
-    { name: 'Bench', emoji: '🪑' },
-    { name: 'Pull-up Bar', emoji: '🔥' },
-    { name: 'Resistance Bands', emoji: '🎗️' },
-    { name: 'Kettlebells', emoji: '⚫' },
-    { name: 'No Equipment', emoji: '🏃' }
+  const gymChains = [
+    '24 Hour Fitness',
+    'Anytime Fitness',
+    'Crunch Fitness',
+    'Equinox',
+    "Gold's Gym",
+    'LA Fitness',
+    'Lifetime Fitness',
+    'Planet Fitness',
+    'EoS Fitness',
+    'Other Commercial Gym',
+    'Multiple Gyms (pick primary)',
   ]
+
+  const equipmentCategories: EquipmentCategory[] = [
+    {
+      category: 'Basic Free Weights',
+      items: [
+        { name: 'Dumbbells', emoji: '💪' },
+        { name: 'Barbell', emoji: '🏋️' },
+        { name: 'Kettlebells', emoji: '⚫' },
+        { name: 'Weight Plates', emoji: '⚙️' },
+      ]
+    },
+    {
+      category: 'Benches & Racks',
+      items: [
+        { name: 'Flat/Adjustable Bench', emoji: '🪑' },
+        { name: 'Power Rack / Squat Rack', emoji: '🔲' },
+        { name: 'Smith Machine', emoji: '🏗️' },
+      ]
+    },
+    {
+      category: 'Cable & Pulley Systems',
+      items: [
+        { name: 'Cable Machine', emoji: '🔗' },
+        { name: 'All-in-One System (Smith + Cables)', emoji: '🏢' },
+        { name: 'Landmine Attachment', emoji: '⚓' },
+      ]
+    },
+    {
+      category: 'Leg Machines',
+      items: [
+        { name: 'Leg Press / Hack Squat', emoji: '🦵' },
+        { name: 'Leg Curl / Leg Extension', emoji: '🦿' },
+        { name: 'Seated Calf Raise', emoji: '👟' },
+      ]
+    },
+    {
+      category: 'Cardio Equipment',
+      items: [
+        { name: 'Treadmill', emoji: '🏃' },
+        { name: 'Walking Pad', emoji: '🚶' },
+        { name: 'Stationary Bike', emoji: '🚴' },
+        { name: 'Rowing Machine', emoji: '🚣' },
+      ]
+    },
+    {
+      category: 'Functional Training',
+      items: [
+        { name: 'Resistance Bands', emoji: '🎗️' },
+        { name: 'Battle Ropes', emoji: '🪢' },
+        { name: 'TRX / Suspension Trainer', emoji: '🔺' },
+        { name: 'Plyo Box / Step Platform', emoji: '📦' },
+        { name: 'Pull-up Bar', emoji: '🔥' },
+      ]
+    },
+    {
+      category: 'Stability & Core',
+      items: [
+        { name: 'Stability Ball', emoji: '⚽' },
+        { name: 'BOSU Ball', emoji: '🌙' },
+        { name: 'Ab Wheel / Roller', emoji: '⭕' },
+      ]
+    },
+    {
+      category: 'Bodyweight Only',
+      items: [
+        { name: 'No Equipment', emoji: '🏃' },
+      ]
+    }
+  ]
+
+  // Determine if we're in a substep of Step 4
+  const showTrainingLocation = currentStep === 4 && !formData.training_location
+  const showGymSelection = currentStep === 4 && formData.training_location === 'commercial' && !formData.gym_chain
+  const showEquipmentSelection = currentStep === 4 && formData.training_location && formData.training_location !== 'commercial'
+  const showFrequencySelection = currentStep === 4 && 
+    ((formData.training_location === 'commercial' && formData.gym_chain) || 
+     (formData.training_location !== 'commercial' && formData.available_equipment.length > 0))
 
   return (
     <div 
@@ -151,13 +284,19 @@ export default function OnboardingPage() {
             {currentStep === 1 && "Alright, let's get to know you! 👋"}
             {currentStep === 2 && "What's the dream? 🎯"}
             {currentStep === 3 && "Real talk: Where are you at? 💯"}
-            {currentStep === 4 && "Last question - what's in your gym? 🏋️"}
+            {currentStep === 4 && !formData.training_location && "Where do you train? 🏋️"}
+            {currentStep === 4 && formData.training_location === 'commercial' && !formData.gym_chain && "Which gym do you go to? 🏢"}
+            {currentStep === 4 && formData.training_location !== 'commercial' && formData.training_location && "What equipment do you have? 💪"}
+            {currentStep === 4 && showFrequencySelection && "How often can you train? 📅"}
           </h1>
           <p style={{ color: 'var(--textSecondary)' }}>
             {currentStep === 1 && "No judgment, just facts. We need the basics."}
             {currentStep === 2 && "What's the one thing you want most? Pick your mission."}
             {currentStep === 3 && "This helps us not kill you on Day 1 😅"}
-            {currentStep === 4 && "Even if it's just your body weight, we'll make it work!"}
+            {currentStep === 4 && !formData.training_location && "Home gym? Commercial? Let's figure out your setup."}
+            {currentStep === 4 && formData.training_location === 'commercial' && !formData.gym_chain && "This helps us match you with their exact equipment."}
+            {currentStep === 4 && formData.training_location !== 'commercial' && formData.training_location && "Pick all that apply - we'll add specific weights later!"}
+            {currentStep === 4 && showFrequencySelection && "Be honest - we'd rather you crush 3 days than skip 6!"}
           </p>
         </div>
 
@@ -343,81 +482,170 @@ export default function OnboardingPage() {
             </div>
           )}
 
-          {currentStep === 4 && (
-            <div className="space-y-6">
-              <div className="space-y-4">
-                <p className="text-sm" style={{ color: 'var(--textSecondary)' }}>
-                  Pick all that apply - even if it's just you and the floor!
-                </p>
+          {currentStep === 4 && showTrainingLocation && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                {[
+                  { location: 'home', label: 'Home Gym', emoji: '🏠', desc: 'Train at your place' },
+                  { location: 'commercial', label: 'Commercial Gym', emoji: '🏋️', desc: 'Chain or local gym' },
+                  { location: 'outdoors', label: 'Outdoors/Park', emoji: '🌳', desc: 'Calisthenics & bodyweight' },
+                  { location: 'apartment', label: 'Apartment/Hotel', emoji: '🏢', desc: 'Limited space setup' }
+                ].map((item) => (
+                  <button
+                    key={item.location}
+                    type="button"
+                    onClick={() => handleInputChange('training_location', item.location)}
+                    className="p-6 rounded-lg border-2 transition-all duration-300 hover:scale-105"
+                    style={{
+                      backgroundColor: 'var(--bgSecondary)',
+                      borderColor: 'var(--borderColor)',
+                    }}
+                  >
+                    <div className="text-center space-y-2">
+                      <div className="text-4xl">{item.emoji}</div>
+                      <div className="font-bold" style={{ color: 'var(--textPrimary)' }}>
+                        {item.label}
+                      </div>
+                      <div className="text-sm" style={{ color: 'var(--textSecondary)' }}>
+                        {item.desc}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
-                <div className="grid grid-cols-2 gap-3">
-                  {equipmentOptions.map((item) => (
-                    <button
-                      key={item.name}
-                      type="button"
-                      onClick={() => handleEquipmentToggle(item.name)}
-                      className="px-4 py-3 rounded-lg border-2 font-semibold transition-all duration-300 hover:scale-105"
-                      style={{
-                        backgroundColor: formData.available_equipment.includes(item.name) ? 'var(--accent1)' : 'var(--bgSecondary)',
-                        borderColor: formData.available_equipment.includes(item.name) ? 'var(--accent1)' : 'var(--borderColor)',
-                        color: formData.available_equipment.includes(item.name) ? '#FFFFFF' : 'var(--textPrimary)',
-                      }}
-                    >
-                      <span className="mr-2">{item.emoji}</span>
-                      {item.name}
-                    </button>
+          {currentStep === 4 && showGymSelection && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold" style={{ color: 'var(--textPrimary)' }}>
+                  Select your gym
+                </label>
+                <select
+                  value={formData.gym_chain}
+                  onChange={(e) => handleInputChange('gym_chain', e.target.value)}
+                  className="w-full px-4 py-3 rounded-lg border-2 transition-all duration-300"
+                  style={{
+                    backgroundColor: 'var(--bgSecondary)',
+                    borderColor: 'var(--borderColor)',
+                    color: 'var(--textPrimary)',
+                  }}
+                >
+                  <option value="">-- Choose your gym --</option>
+                  {gymChains.map((gym) => (
+                    <option key={gym} value={gym}>
+                      {gym}
+                    </option>
                   ))}
-                </div>
+                </select>
               </div>
 
-              <div className="space-y-3">
-                <div>
-                  <h3 
-                    className="text-xl font-bold"
-                    style={{ color: 'var(--textPrimary)' }}
-                  >
-                    How many days can you REALISTICALLY commit?
-                  </h3>
-                  <p className="text-sm mt-1" style={{ color: 'var(--textSecondary)' }}>
-                    Be honest - we'd rather you crush 3 days than skip 6!
+              {formData.gym_chain === 'Other Commercial Gym' && (
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold" style={{ color: 'var(--textPrimary)' }}>
+                    What's the name of your gym?
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.gym_custom_name}
+                    onChange={(e) => handleInputChange('gym_custom_name', e.target.value)}
+                    className="w-full px-4 py-3 rounded-lg border-2 transition-all duration-300"
+                    style={{
+                      backgroundColor: 'var(--bgSecondary)',
+                      borderColor: 'var(--borderColor)',
+                      color: 'var(--textPrimary)',
+                    }}
+                    placeholder="Enter gym name"
+                  />
+                </div>
+              )}
+
+              {formData.gym_chain === 'Multiple Gyms (pick primary)' && (
+                <div 
+                  className="p-4 rounded-lg border-2"
+                  style={{
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    borderColor: '#3B82F6',
+                  }}
+                >
+                  <p className="text-sm" style={{ color: 'var(--textPrimary)' }}>
+                    💡 We'll create your plan based on the gym with the best equipment selection. You can always adjust later!
                   </p>
                 </div>
+              )}
+            </div>
+          )}
 
-                <div className="grid gap-3">
-                  {[
-                    { freq: '1-2 days per week', sub: 'Just starting or super busy', emoji: '🌱' },
-                    { freq: '3-4 days per week', sub: 'The sweet spot for most people', emoji: '💪' },
-                    { freq: '5-6 days per week', sub: 'You mean business', emoji: '🔥' },
-                    { freq: 'Every day', sub: 'Absolute savage mode', emoji: '🏆' }
-                  ].map((item) => (
-                    <button
-                      key={item.freq}
-                      type="button"
-                      onClick={() => handleInputChange('workout_frequency', item.freq)}
-                      className="px-6 py-3 rounded-lg border-2 text-left transition-all duration-300 hover:scale-102"
-                      style={{
-                        backgroundColor: formData.workout_frequency === item.freq ? 'var(--accent1)' : 'var(--bgSecondary)',
-                        borderColor: formData.workout_frequency === item.freq ? 'var(--accent1)' : 'var(--borderColor)',
-                        color: formData.workout_frequency === item.freq ? '#FFFFFF' : 'var(--textPrimary)',
-                      }}
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-xl">{item.emoji}</span>
-                        <div className="flex-1">
-                          <div className="font-semibold">{item.freq}</div>
-                          <div 
-                            className="text-sm"
-                            style={{ 
-                              color: formData.workout_frequency === item.freq ? 'rgba(255,255,255,0.9)' : 'var(--textSecondary)' 
-                            }}
-                          >
-                            {item.sub}
-                          </div>
+          {currentStep === 4 && showEquipmentSelection && (
+            <div className="space-y-6 max-h-[500px] overflow-y-auto pr-2">
+              {equipmentCategories.map((category) => (
+                <div key={category.category} className="space-y-3">
+                  <h3 
+                    className="text-sm font-bold uppercase tracking-wide"
+                    style={{ color: 'var(--accent2)' }}
+                  >
+                    {category.category}
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    {category.items.map((item) => (
+                      <button
+                        key={item.name}
+                        type="button"
+                        onClick={() => handleEquipmentToggle(item.name)}
+                        className="px-4 py-3 rounded-lg border-2 font-semibold text-left transition-all duration-300 hover:scale-105"
+                        style={{
+                          backgroundColor: formData.available_equipment.includes(item.name) ? 'var(--accent1)' : 'var(--bgSecondary)',
+                          borderColor: formData.available_equipment.includes(item.name) ? 'var(--accent1)' : 'var(--borderColor)',
+                          color: formData.available_equipment.includes(item.name) ? '#FFFFFF' : 'var(--textPrimary)',
+                        }}
+                      >
+                        <span className="mr-2">{item.emoji}</span>
+                        <span className="text-sm">{item.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {currentStep === 4 && showFrequencySelection && (
+            <div className="space-y-3">
+              <div className="grid gap-3">
+                {[
+                  { freq: '1-2 days per week', sub: 'Just starting or super busy', emoji: '🌱' },
+                  { freq: '3-4 days per week', sub: 'The sweet spot for most people', emoji: '💪' },
+                  { freq: '5-6 days per week', sub: 'You mean business', emoji: '🔥' },
+                  { freq: 'Every day', sub: 'Absolute savage mode', emoji: '🏆' }
+                ].map((item) => (
+                  <button
+                    key={item.freq}
+                    type="button"
+                    onClick={() => handleInputChange('workout_frequency', item.freq)}
+                    className="px-6 py-3 rounded-lg border-2 text-left transition-all duration-300 hover:scale-102"
+                    style={{
+                      backgroundColor: formData.workout_frequency === item.freq ? 'var(--accent1)' : 'var(--bgSecondary)',
+                      borderColor: formData.workout_frequency === item.freq ? 'var(--accent1)' : 'var(--borderColor)',
+                      color: formData.workout_frequency === item.freq ? '#FFFFFF' : 'var(--textPrimary)',
+                    }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-xl">{item.emoji}</span>
+                      <div className="flex-1">
+                        <div className="font-semibold">{item.freq}</div>
+                        <div 
+                          className="text-sm"
+                          style={{ 
+                            color: formData.workout_frequency === item.freq ? 'rgba(255,255,255,0.9)' : 'var(--textSecondary)' 
+                          }}
+                        >
+                          {item.sub}
                         </div>
                       </div>
-                    </button>
-                  ))}
-                </div>
+                    </div>
+                  </button>
+                ))}
               </div>
             </div>
           )}
@@ -459,6 +687,19 @@ export default function OnboardingPage() {
                 }}
               >
                 Next →
+              </button>
+            ) : !showFrequencySelection ? (
+              <button
+                onClick={() => {
+                  setError(null)
+                }}
+                className="flex-1 px-6 py-3 rounded-lg font-bold transition-all duration-300 hover:scale-105"
+                style={{
+                  background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+                  color: '#FFFFFF',
+                }}
+              >
+                Continue →
               </button>
             ) : (
               <button
