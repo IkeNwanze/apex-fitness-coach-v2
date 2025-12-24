@@ -165,7 +165,8 @@ export default function OnboardingPage() {
 
       if (dbError) throw dbError
 
-      router.push('/dashboard')
+      // Redirect to photo upload (not dashboard)
+      router.push('/photos/upload')
     } catch (err: any) {
       setError(err.message || 'Failed to save profile')
     } finally {
