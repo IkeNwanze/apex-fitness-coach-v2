@@ -148,19 +148,18 @@ export default function OnboardingPage() {
     try {
       const { error: dbError } = await supabaseBrowser
         .from('user_profiles')
-        .insert({
+        .upsert({
           user_id: user?.id,
           full_name: formData.full_name,
           age: parseInt(formData.age),
           gender: formData.gender,
           fitness_goal: formData.fitness_goal,
           experience_level: formData.experience_level,
-          training_location: formData.training_location,
-          gym_chain: formData.gym_chain || null,
-          gym_custom_name: formData.gym_custom_name || null,
-          available_equipment: formData.training_location === 'commercial' ? [] : formData.available_equipment,
+          available_equipment: formData.available_equipment,
           workout_frequency: formData.workout_frequency,
           has_completed_onboarding: true,
+        }, {
+          onConflict: 'user_id'  // Update if user_id already exists
         })
 
       if (dbError) throw dbError
