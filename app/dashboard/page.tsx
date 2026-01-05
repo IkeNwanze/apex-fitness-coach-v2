@@ -8,6 +8,30 @@ import { useTheme } from '@/components/ThemeProvider'
 import { ThemeSwitcher } from '@/components/ThemeSwitcher'
 import { supabaseBrowser } from '@/lib/supabaseClient'
 
+// XP System - RPG-style exponential curve
+function getXPForLevel(level: number): number {
+  return Math.floor(100 * Math.pow(level, 1.5))
+}
+
+function getXPProgress(totalXP: number, currentLevel: number) {
+  // Calculate total XP needed for current level
+  let totalNeeded = 0
+  for (let i = 1; i < currentLevel; i++) {
+    totalNeeded += getXPForLevel(i)
+  }
+  
+  const xpIntoCurrentLevel = totalXP - totalNeeded
+  const xpNeededForNextLevel = getXPForLevel(currentLevel)
+  const percentToNext = Math.floor((xpIntoCurrentLevel / xpNeededForNextLevel) * 100)
+  
+  return {
+    current: xpIntoCurrentLevel,
+    needed: xpNeededForNextLevel,
+    percent: percentToNext,
+    remaining: xpNeededForNextLevel - xpIntoCurrentLevel
+  }
+}
+
 export default function DashboardPage() {
   const { user, loading: authLoading, signOut } = useAuth()
   const { themeConfig } = useTheme()
@@ -15,9 +39,15 @@ export default function DashboardPage() {
 
   const [profile, setProfile] = useState<any>(null)
   const [activePlan, setActivePlan] = useState<any>(null)
+  const [userStats, setUserStats] = useState<any>(null)
+  const [recentBadges, setRecentBadges] = useState<any[]>([])
+  const [currentWeekProgress, setCurrentWeekProgress] = useState<any>(null)
+  
   const [loadingProfile, setLoadingProfile] = useState(true)
   const [loadingPlan, setLoadingPlan] = useState(true)
+  const [loadingStats, setLoadingStats] = useState(true)
   const [generatingPlan, setGeneratingPlan] = useState(false)
+  const [initializingStats, setInitializingStats] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Redirect if not logged in
@@ -39,19 +69,11 @@ export default function DashboardPage() {
           .eq('user_id', user.id)
           .single()
 
-        if (error) {
-          // Only log if it's not a "no rows found" error
-          if (error.code !== 'PGRST116') {
-            console.error('Error fetching profile:', error)
-          }
-          console.log('No profile found - user needs to complete onboarding')
+        if (error && error.code !== 'PGRST116') {
+          console.error('Error fetching profile:', error)
           return
         }
-        console.log('Profile found:', data)
         setProfile(data)
-      } catch (err: any) {
-        // Silently handle - user probably hasn't completed onboarding
-        console.log('Catch block: No profile found')
       } finally {
         setLoadingProfile(false)
       }
@@ -73,7 +95,7 @@ export default function DashboardPage() {
           .eq('status', 'active')
           .single()
 
-        if (error && error.code !== 'PGRST116') { // PGRST116 = no rows found
+        if (error && error.code !== 'PGRST116') {
           throw error
         }
         setActivePlan(data)
@@ -87,13 +109,102 @@ export default function DashboardPage() {
     fetchPlan()
   }, [user])
 
+  // Fetch user stats, badges, and progress
+  useEffect(() => {
+    async function fetchGameData() {
+      if (!user) return
+
+      try {
+        // Fetch user stats
+        const { data: stats } = await supabaseBrowser
+          .from('user_stats')
+          .select('*')
+          .eq('user_id', user.id)
+          .single()
+
+        setUserStats(stats)
+
+        // Fetch recent badges (last 3)
+        const { data: badges } = await supabaseBrowser
+          .from('user_badges')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('unlocked_at', { ascending: false })
+          .limit(3)
+
+        setRecentBadges(badges || [])
+
+        // Fetch current week progress
+        if (stats) {
+          const { data: weekProgress } = await supabaseBrowser
+            .from('user_progress')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('week_number', stats.current_week)
+            .single()
+
+          setCurrentWeekProgress(weekProgress)
+        }
+
+      } catch (err: any) {
+        console.error('Error fetching game data:', err)
+      } finally {
+        setLoadingStats(false)
+      }
+    }
+
+    fetchGameData()
+  }, [user])
+
+  // Initialize stats if they don't exist
+  const handleInitializeStats = async () => {
+    setInitializingStats(true)
+    setError(null)
+
+    try {
+      const { data: { session } } = await supabaseBrowser.auth.getSession()
+      
+      if (!session) {
+        setError('Please log in again')
+        return
+      }
+
+      const response = await fetch('/api/initialize-stats', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to initialize stats')
+      }
+
+      // Refresh stats
+      setUserStats(result.stats)
+      if (result.firstBadge) {
+        setRecentBadges([result.firstBadge])
+      }
+      if (result.weekProgress) {
+        setCurrentWeekProgress(result.weekProgress)
+      }
+
+    } catch (err: any) {
+      console.error('Initialization error:', err)
+      setError(err.message || 'Failed to initialize stats')
+    } finally {
+      setInitializingStats(false)
+    }
+  }
+
   // Generate plan
   const handleGeneratePlan = async () => {
     setGeneratingPlan(true)
     setError(null)
 
     try {
-      // Get the current session token
       const { data: { session }, error: sessionError } = await supabaseBrowser.auth.getSession()
       
       if (sessionError || !session) {
@@ -106,7 +217,7 @@ export default function DashboardPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,  // ← Send token here!
+          'Authorization': `Bearer ${session.access_token}`,
         },
       })
 
@@ -116,7 +227,6 @@ export default function DashboardPage() {
         throw new Error(result.error || 'Failed to generate plan')
       }
 
-      // Refresh the plan
       setActivePlan(result.plan)
     } catch (err: any) {
       console.error('Plan generation error:', err)
@@ -126,7 +236,7 @@ export default function DashboardPage() {
     }
   }
 
-  // Show loading while checking auth
+  // Show loading
   if (authLoading) {
     return (
       <div 
@@ -140,23 +250,22 @@ export default function DashboardPage() {
     )
   }
 
-  // Don't render if no user (will redirect)
   if (!user) {
     return null
   }
 
   return (
     <div 
-      className="min-h-screen p-8 transition-all duration-500"
+      className="min-h-screen p-4 md:p-8 transition-all duration-500"
       style={{ background: 'var(--bgPrimary)' }}
     >
-      <div className="max-w-6xl mx-auto space-y-8">
+      <div className="max-w-7xl mx-auto space-y-6">
         
         {/* Header */}
         <div className="flex justify-between items-start">
           <div>
             <h1 
-              className="text-4xl font-bold mb-2"
+              className="text-3xl md:text-4xl font-bold mb-2"
               style={{
                 backgroundImage: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
                 WebkitBackgroundClip: 'text',
@@ -171,10 +280,9 @@ export default function DashboardPage() {
             </p>
           </div>
 
-          {/* Logout Button */}
           <button
             onClick={signOut}
-            className="px-6 py-3 rounded-lg font-bold transition-all duration-300 hover:opacity-80"
+            className="px-4 md:px-6 py-2 md:py-3 rounded-lg font-bold transition-all duration-300 hover:opacity-80"
             style={{
               backgroundImage: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
               color: '#FFFFFF',
@@ -184,19 +292,172 @@ export default function DashboardPage() {
           </button>
         </div>
 
+        {/* XP & Level Display */}
+        {!loadingStats && userStats && (
+          <div
+            className="themed-card p-6 border-2"
+            style={{
+              backgroundColor: 'var(--bgCard)',
+              borderColor: 'var(--borderColor)',
+            }}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <div className="text-3xl font-black" style={{ color: 'var(--textPrimary)' }}>
+                  Level {userStats.level}
+                </div>
+                <div className="text-sm" style={{ color: 'var(--textSecondary)' }}>
+                  {getXPProgress(userStats.total_xp, userStats.level).remaining} XP to Level {userStats.level + 1}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-sm font-semibold" style={{ color: 'var(--accent2)' }}>
+                  Total XP
+                </div>
+                <div className="text-2xl font-bold" style={{ color: 'var(--accent1)' }}>
+                  {userStats.total_xp.toLocaleString()}
+                </div>
+              </div>
+            </div>
+            
+            {/* XP Progress Bar */}
+            <div className="relative h-8 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--bgSecondary)' }}>
+              <div 
+                className="absolute inset-0 transition-all duration-500"
+                style={{
+                  width: `${getXPProgress(userStats.total_xp, userStats.level).percent}%`,
+                  backgroundImage: `linear-gradient(90deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+                }}
+              />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-sm font-bold" style={{ 
+                  color: getXPProgress(userStats.total_xp, userStats.level).percent > 50 ? '#FFFFFF' : 'var(--textPrimary)',
+                  textShadow: '0 1px 2px rgba(0,0,0,0.3)'
+                }}>
+                  {getXPProgress(userStats.total_xp, userStats.level).current.toLocaleString()} / {getXPProgress(userStats.total_xp, userStats.level).needed.toLocaleString()} XP
+                </span>
+              </div>
+            </div>
+            
+            <div className="text-xs text-center mt-2" style={{ color: 'var(--textSecondary)' }}>
+              {getXPProgress(userStats.total_xp, userStats.level).percent}% to next level
+            </div>
+          </div>
+        )}
+
+        {/* X% Better Hero Metric */}
+        {!loadingStats && userStats && currentWeekProgress && (
+          <div
+            className="themed-card p-8 md:p-12 border-2 text-center relative overflow-hidden"
+            style={{
+              backgroundColor: 'var(--bgCard)',
+              borderColor: 'var(--accent1)',
+            }}
+          >
+            <div className="text-sm font-semibold mb-2" style={{ color: 'var(--textSecondary)' }}>
+              This Week's Progress
+            </div>
+            <div 
+              className="text-6xl md:text-8xl font-black mb-4"
+              style={{
+                backgroundImage: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2}, ${themeConfig.colors.accent3})`,
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+                filter: 'drop-shadow(0 0 20px rgba(255,255,255,0.3))',
+              }}
+            >
+              {currentWeekProgress.x_percent_better || 0}%
+            </div>
+            <div className="text-xl md:text-2xl font-bold" style={{ color: 'var(--textPrimary)' }}>
+              Better Than Last Week!
+            </div>
+            <div className="mt-4 text-sm" style={{ color: 'var(--textSecondary)' }}>
+              Keep showing up - every workout counts! 💪
+            </div>
+          </div>
+        )}
+
+        {/* Initialize Stats Button (if no stats) */}
+        {!loadingStats && !userStats && activePlan && (
+          <div
+            className="themed-card p-8 border-2 text-center"
+            style={{
+              backgroundColor: 'var(--bgCard)',
+              borderColor: 'var(--borderColor)',
+            }}
+          >
+            <div className="text-4xl mb-4">🎮</div>
+            <h3 className="text-2xl font-bold mb-4" style={{ color: 'var(--textPrimary)' }}>
+              Ready to Start Tracking?
+            </h3>
+            <p className="mb-6" style={{ color: 'var(--textSecondary)' }}>
+              Initialize your progress tracking and earn your first badge!
+            </p>
+            <button
+              onClick={handleInitializeStats}
+              disabled={initializingStats}
+              className="px-8 py-4 rounded-lg font-bold text-lg transition-all duration-300 hover:scale-105 disabled:opacity-50"
+              style={{
+                backgroundImage: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+                color: '#FFFFFF',
+              }}
+            >
+              {initializingStats ? 'Starting...' : 'Start Tracking Progress 🚀'}
+            </button>
+          </div>
+        )}
+
+        {/* Badges Section */}
+        {!loadingStats && recentBadges.length > 0 && (
+          <div
+            className="themed-card p-6 border-2"
+            style={{
+              backgroundColor: 'var(--bgCard)',
+              borderColor: 'var(--borderColor)',
+            }}
+          >
+            <h3 className="text-xl font-bold mb-4 flex items-center gap-2" style={{ color: 'var(--textPrimary)' }}>
+              <span>🏆</span> Recent Badges
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {recentBadges.map((badge) => (
+                <div
+                  key={badge.id}
+                  className="p-4 rounded-lg border-2 text-center transition-all duration-300 hover:scale-105"
+                  style={{
+                    backgroundColor: 'var(--bgSecondary)',
+                    borderColor: 'var(--accent1)',
+                  }}
+                >
+                  <div className="text-4xl mb-2">🏅</div>
+                  <div className="font-bold mb-1" style={{ color: 'var(--accent1)' }}>
+                    {badge.badge_name}
+                  </div>
+                  <div className="text-sm" style={{ color: 'var(--textSecondary)' }}>
+                    {badge.badge_description}
+                  </div>
+                  <div className="text-xs mt-2" style={{ color: 'var(--accent2)' }}>
+                    +{badge.xp_earned} XP
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Generate Plan Section OR Onboarding Prompt */}
         {!loadingProfile && (
           <>
             {profile ? (
-              // User has completed onboarding - show plan section
               <div
-                className="themed-card p-8 border-2"
+                className="themed-card p-6 md:p-8 border-2"
                 style={{
                   backgroundColor: 'var(--bgCard)',
                   borderColor: 'var(--borderColor)',
                 }}
               >
-                <div className="flex justify-between items-center mb-6">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                   <div>
                     <h3 
                       className="text-2xl font-bold mb-2"
@@ -215,7 +476,7 @@ export default function DashboardPage() {
                   <button
                     onClick={handleGeneratePlan}
                     disabled={generatingPlan}
-                    className="px-6 py-3 rounded-lg font-bold transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="px-6 py-3 rounded-lg font-bold transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                     style={{
                       backgroundImage: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
                       color: '#FFFFFF',
@@ -253,7 +514,6 @@ export default function DashboardPage() {
                   </div>
                 ) : activePlan ? (
                   <div className="space-y-6">
-                    {/* Quick Stats */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       <div 
                         className="p-4 rounded-lg"
@@ -307,7 +567,6 @@ export default function DashboardPage() {
                       </div>
                     </div>
 
-                    {/* Disclaimer */}
                     {activePlan.plan_json.disclaimer && (
                       <div 
                         className="p-4 rounded-lg border"
@@ -321,7 +580,6 @@ export default function DashboardPage() {
                       </div>
                     )}
 
-                    {/* Coming Soon Notice */}
                     <div 
                       className="p-6 rounded-lg border-2"
                       style={{
@@ -345,7 +603,6 @@ export default function DashboardPage() {
                 )}
               </div>
             ) : (
-              // User has NOT completed onboarding - show welcome prompt
               <div
                 className="themed-card p-12 border-2 text-center"
                 style={{
@@ -401,7 +658,7 @@ export default function DashboardPage() {
         {/* Profile Summary */}
         {!loadingProfile && profile && (
           <div
-            className="themed-card p-8 border-2"
+            className="themed-card p-6 md:p-8 border-2"
             style={{
               backgroundColor: 'var(--bgCard)',
               borderColor: 'var(--borderColor)',
