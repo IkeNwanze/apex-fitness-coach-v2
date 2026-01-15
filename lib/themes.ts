@@ -109,24 +109,24 @@ export const themes: Record<ThemeName, Theme> = {
   bee: {
     name: 'bee',
     displayName: 'Bee Hive',
-    description: 'Warm nature-inspired premium',
+    description: 'Warm honeycomb luxury',
     shape: 'hexagonal',
     animation: 'organic',
     colors: {
-      bgPrimary: '#1F1F1F', // Charcoal Black
-      bgSecondary: '#2a2a2a',
-      bgCard: '#2a2a2a',
+      bgPrimary: '#171717', // Matte Black (from your image)
+      bgSecondary: '#1F1F1F', // Slightly lighter black
+      bgCard: '#2a2520', // Dark brown with warmth
       textPrimary: '#FFF6D6', // Soft Cream
-      textSecondary: '#c9b88c',
+      textSecondary: '#c9b88c', // Muted gold-beige
       accent1: '#FFC83D', // Honey Gold (primary)
       accent2: '#FFB000', // Warm Amber (secondary)
-      accent3: '#FFE066', // Pollen Yellow
-      accent4: '#4CAF50', // Leaf Green
-      accentSpecial: '#6B4EFF', // Royal Purple (Queen accent)
-      borderColor: '#FFC83D',
-      glowIntensity: '12px',
-      shadowIntensity: '0.4',
-      progressFill: '#FFB000', // Honey fill
+      accent3: '#FFE066', // Pollen Yellow (light)
+      accent4: '#CC8800', // Deep Honey (dark)
+      accentSpecial: '#6B4EFF', // Royal Purple (Queen)
+      borderColor: '#FFC83D', // Honey Gold borders
+      glowIntensity: '16px', // Warm honey glow
+      shadowIntensity: '0.6', // Deeper shadows
+      progressFill: '#FFB000', // Honey progress fill
     },
   },
 }

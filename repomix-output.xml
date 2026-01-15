@@ -41,13 +41,19 @@ The content is organized as follows:
 
 <directory_structure>
 .gitignore
+app/api/generate-plan/route.ts
+app/api/initialize-stats/route.ts
+app/api/test-auth/route.ts
 app/dashboard/page.tsx
+app/dashboard/page.tsx.backup
 app/favicon.ico
 app/globals.css
 app/layout.tsx
 app/login/page.tsx
 app/onboarding/page.tsx
 app/page.tsx
+app/photos/upload/page.tsx
+app/plan/page.tsx
 app/signup/page.tsx
 app/test/page.tsx
 components/AuthProvider.tsx
@@ -74,6 +80,511 @@ tsconfig.json
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="app/plan/page.tsx">
+'use client'
+
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { useAuth } from '@/components/AuthProvider'
+import { useTheme } from '@/components/ThemeProvider'
+import { supabaseBrowser } from '@/lib/supabaseClient'
+
+interface UserPlan {
+  id: string
+  plan_json: any
+  created_at: string
+  status: string
+}
+
+export default function PlanPage() {
+  const { user, loading: authLoading } = useAuth()
+  const { themeConfig } = useTheme()
+  const router = useRouter()
+  
+  const [plan, setPlan] = useState<UserPlan | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [currentWeek, setCurrentWeek] = useState(1)
+
+  // Redirect if not logged in
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push('/login')
+    }
+  }, [user, authLoading, router])
+
+  // Load user's plan
+  useEffect(() => {
+    async function loadPlan() {
+      if (!user) return
+
+      try {
+        setLoading(true)
+        setError(null)
+
+        const { data, error: fetchError } = await supabaseBrowser
+          .from('user_plans')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('status', 'active')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single()
+
+        if (fetchError) {
+          if (fetchError.code === 'PGRST116') {
+            // No plan found
+            setError('No active plan found. Generate one from your dashboard!')
+          } else {
+            throw fetchError
+          }
+          return
+        }
+
+        setPlan(data)
+      } catch (err: any) {
+        console.error('Error loading plan:', err)
+        setError(err.message || 'Failed to load plan')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadPlan()
+  }, [user])
+
+  // Show loading state
+  if (authLoading || loading) {
+    return (
+      <div 
+        className="min-h-screen flex items-center justify-center"
+        style={{ background: 'var(--bgPrimary)' }}
+      >
+        <div style={{ color: 'var(--textPrimary)' }}>
+          Loading your plan...
+        </div>
+      </div>
+    )
+  }
+
+  // Show error state
+  if (error || !plan) {
+    return (
+      <div 
+        className="min-h-screen p-8"
+        style={{ background: 'var(--bgPrimary)' }}
+      >
+        <div className="max-w-4xl mx-auto">
+          <div
+            className="themed-card p-8 border-2 text-center"
+            style={{
+              backgroundColor: 'var(--bgCard)',
+              borderColor: 'var(--borderColor)',
+            }}
+          >
+            <h2 
+              className="text-2xl font-bold mb-4"
+              style={{ color: 'var(--textPrimary)' }}
+            >
+              {error || 'No plan found'}
+            </h2>
+            <button
+              onClick={() => router.push('/dashboard')}
+              className="px-6 py-3 rounded-lg font-bold transition-all duration-300"
+              style={{
+                background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+                color: '#FFFFFF',
+              }}
+            >
+              Go to Dashboard
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const planData = plan.plan_json
+  const weeklyPlan = planData?.weekly_plan
+  const totalWeeks = planData?.time_to_goal?.estimate_weeks_range?.max || 12
+
+  return (
+    <div 
+      className="min-h-screen p-8 transition-all duration-500"
+      style={{ background: 'var(--bgPrimary)' }}
+    >
+      <div className="max-w-6xl mx-auto space-y-8">
+        
+        {/* Header */}
+        <div className="flex justify-between items-start">
+          <div>
+            <h1 
+              className="text-4xl font-bold mb-2"
+              style={{
+                background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+              }}
+            >
+              Your Workout Plan
+            </h1>
+            <p style={{ color: 'var(--textSecondary)' }}>
+              {weeklyPlan?.split_name || 'Custom Training Program'} • {weeklyPlan?.days_per_week || 4} days/week
+            </p>
+          </div>
+
+          <button
+            onClick={() => router.push('/dashboard')}
+            className="px-6 py-3 rounded-lg font-bold border-2 transition-all duration-300 hover:opacity-80"
+            style={{
+              borderColor: 'var(--borderColor)',
+              color: 'var(--textPrimary)',
+            }}
+          >
+            ← Back to Dashboard
+          </button>
+        </div>
+
+        {/* Week Navigation */}
+        <div
+          className="themed-card p-6 border-2"
+          style={{
+            backgroundColor: 'var(--bgCard)',
+            borderColor: 'var(--borderColor)',
+          }}
+        >
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => setCurrentWeek(Math.max(1, currentWeek - 1))}
+              disabled={currentWeek === 1}
+              className="px-4 py-2 rounded-lg font-bold border-2 transition-all duration-300 disabled:opacity-30"
+              style={{
+                borderColor: 'var(--borderColor)',
+                color: 'var(--textPrimary)',
+              }}
+            >
+              ← Previous Week
+            </button>
+
+            <div className="text-center">
+              <h2 
+                className="text-2xl font-bold"
+                style={{ color: 'var(--accent1)' }}
+              >
+                Week {currentWeek}
+              </h2>
+              <p className="text-sm" style={{ color: 'var(--textSecondary)' }}>
+                of {totalWeeks} weeks
+              </p>
+            </div>
+
+            <button
+              onClick={() => setCurrentWeek(Math.min(totalWeeks, currentWeek + 1))}
+              disabled={currentWeek === totalWeeks}
+              className="px-4 py-2 rounded-lg font-bold border-2 transition-all duration-300 disabled:opacity-30"
+              style={{
+                borderColor: 'var(--borderColor)',
+                color: 'var(--textPrimary)',
+              }}
+            >
+              Next Week →
+            </button>
+          </div>
+        </div>
+
+        {/* Weekly Schedule Preview */}
+        {weeklyPlan?.schedule && (
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {weeklyPlan.schedule.map((day: any, index: number) => (
+              <div
+                key={index}
+                className="themed-card p-6 border-2 cursor-pointer transition-all duration-300 hover:scale-105"
+                style={{
+                  backgroundColor: 'var(--bgCard)',
+                  borderColor: 'var(--borderColor)',
+                }}
+              >
+                <h3 
+                  className="font-bold mb-2"
+                  style={{ color: 'var(--accent1)' }}
+                >
+                  {day.day_label}
+                </h3>
+                <p className="text-sm" style={{ color: 'var(--textSecondary)' }}>
+                  {day.workout?.length || 0} exercises
+                </p>
+                <p className="text-xs mt-2" style={{ color: 'var(--textSecondary)' }}>
+                  {day.session_focus}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Detailed Workout View */}
+        <div className="space-y-6">
+          {weeklyPlan?.schedule?.map((day: any, dayIndex: number) => (
+            <div
+              key={dayIndex}
+              className="themed-card p-8 border-2 space-y-6"
+              style={{
+                backgroundColor: 'var(--bgCard)',
+                borderColor: 'var(--borderColor)',
+              }}
+            >
+              {/* Day Header */}
+              <div>
+                <h2 
+                  className="text-2xl font-bold mb-2"
+                  style={{ color: 'var(--accent1)' }}
+                >
+                  {day.day_label}
+                </h2>
+                <p style={{ color: 'var(--textSecondary)' }}>
+                  {day.session_focus}
+                </p>
+              </div>
+
+              {/* Warmup */}
+              {day.warmup && day.warmup.length > 0 && (
+                <div>
+                  <h3 
+                    className="text-lg font-bold mb-2"
+                    style={{ color: 'var(--accent2)' }}
+                  >
+                    Warmup
+                  </h3>
+                  <ul className="space-y-1">
+                    {day.warmup.map((item: string, i: number) => (
+                      <li key={i} style={{ color: 'var(--textSecondary)' }}>
+                        • {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Exercises */}
+              <div className="space-y-4">
+                <h3 
+                  className="text-lg font-bold"
+                  style={{ color: 'var(--textPrimary)' }}
+                >
+                  Main Workout
+                </h3>
+                {day.workout?.map((exercise: any, exIndex: number) => (
+                  <div
+                    key={exIndex}
+                    className="p-6 rounded-lg border-2"
+                    style={{
+                      backgroundColor: 'var(--bgSecondary)',
+                      borderColor: 'var(--borderColor)',
+                    }}
+                  >
+                    {/* Exercise Header */}
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <h4 
+                          className="text-xl font-bold"
+                          style={{ color: 'var(--textPrimary)' }}
+                        >
+                          {exIndex + 1}. {exercise.exercise}
+                        </h4>
+                        <p 
+                          className="text-lg font-semibold mt-1"
+                          style={{ color: 'var(--accent1)' }}
+                        >
+                          {exercise.sets} sets × {exercise.reps} reps
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Exercise Details */}
+                    <div className="space-y-3">
+                      {/* Why This Exercise */}
+                      {exercise.why_this_exercise && (
+                        <div>
+                          <p 
+                            className="text-sm font-semibold mb-1"
+                            style={{ color: 'var(--accent2)' }}
+                          >
+                            💡 Why This Exercise:
+                          </p>
+                          <p 
+                            className="text-sm"
+                            style={{ color: 'var(--textSecondary)' }}
+                          >
+                            {exercise.why_this_exercise}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Form Cues */}
+                      {exercise.form_cues && exercise.form_cues.length > 0 && (
+                        <div>
+                          <p 
+                            className="text-sm font-semibold mb-1"
+                            style={{ color: 'var(--accent3)' }}
+                          >
+                            ✅ Form Cues:
+                          </p>
+                          <ul className="text-sm space-y-1">
+                            {exercise.form_cues.map((cue: string, i: number) => (
+                              <li 
+                                key={i}
+                                style={{ color: 'var(--textSecondary)' }}
+                              >
+                                • {cue}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* Tempo */}
+                      {exercise.tempo && (
+                        <div>
+                          <p 
+                            className="text-sm"
+                            style={{ color: 'var(--textSecondary)' }}
+                          >
+                            ⏱️ Tempo: {exercise.tempo} | Rest: {exercise.rest_seconds || 60}s
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Substitutions */}
+                      {exercise.substitutions && exercise.substitutions.length > 0 && (
+                        <div>
+                          <p 
+                            className="text-sm font-semibold mb-1"
+                            style={{ color: 'var(--textSecondary)' }}
+                          >
+                            🔄 Alternatives:
+                          </p>
+                          <p 
+                            className="text-sm"
+                            style={{ color: 'var(--textSecondary)' }}
+                          >
+                            {exercise.substitutions.join(', ')}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Cooldown */}
+              {day.cooldown && day.cooldown.length > 0 && (
+                <div>
+                  <h3 
+                    className="text-lg font-bold mb-2"
+                    style={{ color: 'var(--accent2)' }}
+                  >
+                    Cooldown
+                  </h3>
+                  <ul className="space-y-1">
+                    {day.cooldown.map((item: string, i: number) => (
+                      <li key={i} style={{ color: 'var(--textSecondary)' }}>
+                        • {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Optional Finisher */}
+              {day.finisher_optional && day.finisher_optional.length > 0 && (
+                <div>
+                  <h3 
+                    className="text-lg font-bold mb-2"
+                    style={{ color: 'var(--accent4)' }}
+                  >
+                    Optional Finisher
+                  </h3>
+                  <ul className="space-y-1">
+                    {day.finisher_optional.map((item: string, i: number) => (
+                      <li key={i} style={{ color: 'var(--textSecondary)' }}>
+                        • {item}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Nutrition Summary */}
+        {planData?.nutrition && (
+          <div
+            className="themed-card p-8 border-2"
+            style={{
+              backgroundColor: 'var(--bgCard)',
+              borderColor: 'var(--borderColor)',
+            }}
+          >
+            <h2 
+              className="text-2xl font-bold mb-4"
+              style={{ color: 'var(--accent1)' }}
+            >
+              Nutrition Targets
+            </h2>
+            <div className="grid md:grid-cols-3 gap-4">
+              <div>
+                <p 
+                  className="text-sm"
+                  style={{ color: 'var(--textSecondary)' }}
+                >
+                  Calories
+                </p>
+                <p 
+                  className="text-2xl font-bold"
+                  style={{ color: 'var(--textPrimary)' }}
+                >
+                  {planData.nutrition.calorie_target_range?.min || 0} - {planData.nutrition.calorie_target_range?.max || 0}
+                </p>
+              </div>
+              <div>
+                <p 
+                  className="text-sm"
+                  style={{ color: 'var(--textSecondary)' }}
+                >
+                  Protein
+                </p>
+                <p 
+                  className="text-2xl font-bold"
+                  style={{ color: 'var(--textPrimary)' }}
+                >
+                  {planData.nutrition.macros_grams?.protein || 0}g
+                </p>
+              </div>
+              <div>
+                <p 
+                  className="text-sm"
+                  style={{ color: 'var(--textSecondary)' }}
+                >
+                  Carbs / Fat
+                </p>
+                <p 
+                  className="text-2xl font-bold"
+                  style={{ color: 'var(--textPrimary)' }}
+                >
+                  {planData.nutrition.macros_grams?.carbs || 0}g / {planData.nutrition.macros_grams?.fat || 0}g
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  )
+}
+</file>
 
 <file path=".gitignore">
 # Logs
@@ -215,6 +726,1176 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+</file>
+
+<file path="app/api/generate-plan/route.ts">
+import { NextRequest, NextResponse } from 'next/server'
+import Anthropic from '@anthropic-ai/sdk'
+
+// Initialize Anthropic client
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY!,
+})
+
+export async function POST(request: NextRequest) {
+  try {
+    // Get user data from request body
+    const body = await request.json()
+    const { profile, currentPhotos, goalPhotos } = body
+
+    if (!profile) {
+      return NextResponse.json(
+        { error: 'Profile data is required' },
+        { status: 400 }
+      )
+    }
+
+    // Build the enhanced AI prompt
+    console.log('Building prompt for user:', profile.full_name)
+    const prompt = buildEnhancedPrompt(profile, currentPhotos, goalPhotos)
+    console.log('Prompt length:', prompt.length, 'characters')
+
+    // Call Claude API
+    console.log('Calling Claude API...')
+    const message = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 16000,
+      temperature: 0.7,
+      messages: [
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+    })
+    console.log('✅ Claude API responded')
+
+    // Extract the JSON response
+    console.log('Raw AI message:', message)
+    
+    const responseText = message.content[0]?.type === 'text' 
+      ? message.content[0].text 
+      : ''
+
+    console.log('Response text length:', responseText.length)
+    console.log('First 500 chars:', responseText.substring(0, 500))
+
+    if (!responseText || responseText.length === 0) {
+      console.error('Empty response from AI')
+      return NextResponse.json(
+        { error: 'AI returned empty response', details: 'No content in message' },
+        { status: 500 }
+      )
+    }
+
+    // Parse the JSON (Claude should return pure JSON)
+    let planData
+    try {
+      // Remove markdown code blocks if present
+      let cleanedResponse = responseText
+        .replace(/```json\n?/gi, '')
+        .replace(/```\n?/g, '')
+        .trim()
+      
+      // Remove any leading/trailing text before/after JSON
+      const jsonStart = cleanedResponse.indexOf('{')
+      const jsonEnd = cleanedResponse.lastIndexOf('}')
+      
+      if (jsonStart === -1 || jsonEnd === -1) {
+        throw new Error('No JSON object found in response')
+      }
+      
+      cleanedResponse = cleanedResponse.substring(jsonStart, jsonEnd + 1)
+      
+      console.log('Cleaned response length:', cleanedResponse.length)
+      console.log('Attempting to parse JSON...')
+      
+      planData = JSON.parse(cleanedResponse)
+      console.log('✅ JSON parsed successfully')
+    } catch (parseError: any) {
+      console.error('Failed to parse AI response')
+      console.error('Parse error:', parseError.message)
+      console.error('Full response:', responseText)
+      return NextResponse.json(
+        { 
+          error: 'Failed to parse AI response', 
+          details: parseError.message,
+          responsePreview: responseText.substring(0, 1000)
+        },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json({
+      success: true,
+      plan: planData,
+    })
+
+  } catch (error: any) {
+    console.error('AI generation error:', error)
+    return NextResponse.json(
+      { error: 'Failed to generate plan', details: error.message },
+      { status: 500 }
+    )
+  }
+}
+
+function buildEnhancedPrompt(
+  profile: any,
+  currentPhotos: any[] = [],
+  goalPhotos: any[] = []
+): string {
+  const hasPhotos = currentPhotos.length > 0 || goalPhotos.length > 0
+  
+  // Calculate BMR using Mifflin-St Jeor equation
+  const heightCm = profile.height_cm || 178
+  const weightKg = profile.weight_unit === 'kg' 
+    ? profile.current_weight 
+    : profile.current_weight * 0.453592
+  const age = profile.age
+  const isMale = profile.gender === 'Male'
+  
+  let bmr
+  if (isMale) {
+    bmr = Math.round((10 * weightKg) + (6.25 * heightCm) - (5 * age) + 5)
+  } else {
+    bmr = Math.round((10 * weightKg) + (6.25 * heightCm) - (5 * age) - 161)
+  }
+  
+  // Calculate TDEE (BMR * activity multiplier)
+  const activityMultiplier = 1.55 // Moderate activity (3-5 workouts/week)
+  const tdee = Math.round(bmr * activityMultiplier)
+  
+  // Equipment context
+  let equipmentContext = ''
+  if (profile.training_location === 'commercial') {
+    equipmentContext = `Training at a commercial gym (${profile.gym_chain || profile.gym_custom_name || 'unnamed gym'}). Assume access to standard gym equipment: barbells, dumbbells, cable machines, benches, smith machine, leg press, squat racks, etc. Avoid exotic or specialty machines that aren't universally available.`
+  } else {
+    const equipment = profile.available_equipment || []
+    if (equipment.length === 0 || equipment.includes('No Equipment')) {
+      equipmentContext = `Training location: ${profile.training_location}. NO EQUIPMENT AVAILABLE (bodyweight only). CRITICAL: ONLY prescribe bodyweight exercises. Do not suggest ANY equipment-based exercises.`
+    } else {
+      equipmentContext = `Training location: ${profile.training_location}. Available equipment: ${equipment.join(', ')}. CRITICAL: ONLY prescribe exercises using EXACTLY this equipment. Do not suggest equipment they don't have. If they don't have barbells, use dumbbells. If they don't have cables, use bands or bodyweight alternatives.`
+    }
+  }
+
+  // Parse workout frequency
+  const frequencyMap: Record<string, number> = {
+    '1-2 days per week': 2,
+    '3-4 days per week': 4,
+    '5-6 days per week': 5,
+    'Every day': 6
+  }
+  const daysPerWeek = frequencyMap[profile.workout_frequency] || 4
+
+  return `You are an expert fitness coach creating a personalized training plan for Apex Fitness Coach.
+
+CRITICAL RULES:
+- No medical advice, diagnoses, or clinical guidance
+- Do NOT estimate body fat %, weight, or health metrics from photos
+- Use fitness-coach language: focus on visible development, proportions, definition, training priorities
+- Output STRICT JSON ONLY (no markdown, no explanations outside JSON)
+- If any input is missing, make conservative assumptions and list them in assumptions[]
+
+=== USER PROFILE ===
+
+VITALS & DEMOGRAPHICS:
+- Name: ${profile.full_name}
+- Age: ${profile.age}
+- Gender: ${profile.gender}
+- Height: ${profile.height_feet}'${profile.height_inches || 0}" (${heightCm}cm)
+- Current Weight: ${profile.current_weight} ${profile.weight_unit} (${weightKg.toFixed(1)} kg)
+${profile.goal_weight ? `- Goal Weight: ${profile.goal_weight} ${profile.weight_unit} (change needed: ${Math.abs(profile.goal_weight - profile.current_weight).toFixed(1)} ${profile.weight_unit})` : '- Goal: Body composition focus (not scale weight - user wants to look better, not chase a number)'}
+
+METABOLIC DATA (calculated):
+- BMR (Basal Metabolic Rate): ~${bmr} calories/day
+- TDEE (Total Daily Energy Expenditure): ~${tdee} calories/day
+- Activity Level: Moderate (${daysPerWeek} training days per week)
+
+TRAINING PROFILE:
+- Stated Fitness Goal: ${profile.fitness_goal}
+- Experience Level: ${profile.experience_level}
+- ${equipmentContext}
+- Workout Frequency: ${profile.workout_frequency} (${daysPerWeek} days per week)
+
+=== VISUAL ANALYSIS ${hasPhotos ? 'REQUIRED' : '(NO PHOTOS PROVIDED)'} ===
+
+${hasPhotos ? `
+PHOTOS PROVIDED: YES (${currentPhotos.length} current, ${goalPhotos.length} goal)
+
+STEP 1: ANALYZE CURRENT PHYSIQUE
+Based on visible indicators in the current photo(s), assess:
+
+A) MUSCLE DEVELOPMENT (visual, descriptive only - NO percentages):
+   - Upper Body: Shoulder width/roundness, chest thickness/definition, arm development, back width
+   - Core: Visible ab development, oblique definition, overall torso structure
+   - Lower Body: Leg development, glute development, proportions
+   - Overall Symmetry: Balanced vs imbalanced development
+
+B) BODY COMPOSITION (descriptive only - NO measurements):
+   - Visible leanness level (use terms like "lean", "moderate leanness", "higher body fat")
+   - Fat distribution (where fat is held - waist, hips, etc.)
+   - Muscle definition visibility (where muscles are visible vs covered)
+
+C) STRUCTURAL OBSERVATIONS:
+   - Posture indicators
+   - Natural body structure (frame size, limb lengths)
+   - Proportions
+
+D) STRENGTHS TO LEVERAGE (positive focus):
+   - What already looks good
+   - Areas with solid foundation
+   - Natural advantages
+
+STEP 2: ANALYZE GOAL PHYSIQUE
+${goalPhotos.length > 0 ? `
+Based on the goal photo(s):
+${goalPhotos[0]?.description ? `- User's description: "${goalPhotos[0].description}"` : ''}
+${goalPhotos[0]?.goal_person_name ? `- Reference: ${goalPhotos[0].goal_person_name}` : ''}
+${goalPhotos[0]?.goal_person_height ? `- Reference height: ${goalPhotos[0].goal_person_height}` : ''}
+${goalPhotos[0]?.goal_person_weight ? `- Reference weight: ${goalPhotos[0].goal_person_weight}` : ''}
+
+Assess target aesthetics:
+- TARGET MUSCLE DEVELOPMENT: What muscles are prominently developed
+- TARGET LEANNESS: Relative body composition
+- TARGET PROPORTIONS: Key aesthetic features (V-taper, X-frame, athletic build)
+- TARGET DEFINITION: Specific features (abs, V-cut, shoulder definition, chest separation)
+` : 'No goal photos provided - infer from fitness goal and experience level.'}
+
+STEP 3: GAP ANALYSIS (CRITICAL FOR EXERCISE SELECTION)
+Compare current vs goal:
+
+A) MUSCLES TO BUILD (prioritized list):
+   - Which muscle groups need development
+   - Priority: HIGH/MEDIUM/LOW
+   - Expected timeline for visible changes
+   
+B) DEFINITION TO REVEAL:
+   - Areas where muscle exists but is covered
+   - What will emerge as body fat reduces
+   
+C) PROPORTIONS TO BALANCE:
+   - Any asymmetries to address
+   - What needs emphasis to achieve goal proportions
+
+D) EXERCISE SELECTION RATIONALE:
+   For each major muscle group, explain:
+   - Current state
+   - Goal state
+   - WHY specific exercises bridge that gap
+   - Expected progression timeline
+
+STEP 4: PERSONALIZED MOTIVATION
+Create a motivational paragraph that:
+- Acknowledges current strengths
+- Explains specific focus areas
+- Sets realistic expectations with timelines
+- Sounds encouraging but honest
+
+Example tone: "You have great shoulder width to build on - we'll focus on adding chest thickness, especially in the lower pecs, while progressively reducing body fat. Your abs will start showing around week 10-14 as we combine targeted core work with our calorie deficit."
+
+` : `
+PHOTOS PROVIDED: NO
+
+Without photos, generate plan based on:
+- Profile data (goal, experience, equipment, vitals)
+- General principles for the stated goal
+- Conservative assumptions
+
+Note in assumptions[]:
+- Visual analysis would significantly improve specificity
+- Timeline estimates are conservative without visual data
+- Exercise selection is based on goal type, not individual physique analysis
+`}
+
+=== REQUIRED JSON OUTPUT ===
+
+Generate a complete plan with this EXACT structure:
+
+{
+  "assumptions": [
+    "List any assumptions made due to missing data",
+    ${!hasPhotos ? '"No photos provided - using general approach for goal type",' : ''}
+    "Any equipment or experience assumptions"
+  ],
+  
+  "disclaimer": "This plan is for educational purposes only. Consult healthcare professionals before starting any fitness program. Individual results vary based on consistency, nutrition adherence, genetics, and other factors.",
+  
+  ${hasPhotos ? `
+  "current_state_assessment": {
+    "strengths": [
+      "Specific positive attributes visible in photos",
+      "Areas with good development",
+      "Natural advantages"
+    ],
+    "areas_to_develop": [
+      "Specific muscles/areas needing work",
+      "Body composition goals",
+      "Proportional targets"
+    ]
+  },
+  
+  "visual_gap_summary": {
+    "personalized_motivation": "3-5 sentence paragraph acknowledging strengths and explaining focus areas with timeline mentions",
+    
+    "priority_focus_areas": [
+      {
+        "area": "Muscle group or aesthetic feature",
+        "current_state": "Visual assessment",
+        "target_state": "Desired outcome",
+        "why": "Why this matters for achieving goal physique",
+        "priority": "high|medium|low",
+        "timeline_weeks": number,
+        "training_approach": "How we'll address this"
+      }
+    ]
+  },
+  ` : ''}
+  
+  "inputs_used": {
+    "has_photos": ${hasPhotos},
+    "height_cm": ${heightCm},
+    "weight_kg": ${weightKg.toFixed(1)},
+    "bmr": ${bmr},
+    "tdee": ${tdee},
+    "goal_weight": ${profile.goal_weight ? `"${profile.goal_weight} ${profile.weight_unit}"` : '"Body composition focus"'},
+    "training_location": "${profile.training_location}",
+    "equipment": ${JSON.stringify(profile.available_equipment || [])},
+    "days_per_week": ${daysPerWeek}
+  },
+  
+  "time_to_goal": {
+    "estimate_weeks_range": { 
+      "min": number, 
+      "max": number 
+    },
+    "rationale": "Explanation based on current weight, goal, expected rate of change (0.5-2 lbs muscle/month or 0.5-2 lbs fat/week), age, experience level",
+    "confidence": "low|medium|high"
+  },
+  
+  "milestones": [
+    {
+      "week_range": { "start": 1, "end": 4 },
+      "title": "Foundation Phase",
+      "expected_changes": [
+        "Improved form and technique",
+        "Initial strength gains",
+        "Routine establishment"
+      ],
+      "visual_changes": [
+        "Pump becomes noticeable",
+        "Slight muscle hardness increase",
+        "Clothes may fit differently"
+      ],
+      "focus": ["Form mastery", "Building consistency"]
+    }
+  ],
+  
+  "weekly_plan": {
+    "program_length_weeks": number,
+    "days_per_week": ${daysPerWeek},
+    "split_name": "Upper/Lower" | "Push/Pull/Legs" | "Full Body" | "Bro Split",
+    "split_rationale": "WHY this split for THIS user based on days available, experience, and goals",
+    
+    "schedule": [
+      {
+        "day_label": "Day 1: [Muscle Focus]",
+        "session_focus": "Brief description",
+        "target_muscle_groups": ["Chest", "Triceps", "Shoulders"],
+        ${hasPhotos ? '"why_this_session": "How this addresses gaps identified in visual analysis",' : ''}
+        
+        "warmup": [
+          "5 min light cardio",
+          "Dynamic stretches",
+          "Mobility work"
+        ],
+        
+        "workout": [
+          {
+            "exercise": "Exercise name",
+            "sets": number,
+            "reps": "8-10" | "12-15" | "AMRAP",
+            "rest_seconds": 60-120,
+            "tempo": "2-0-1-0 (eccentric-pause-concentric-pause)",
+            "notes": "Execution tips",
+            ${hasPhotos ? '"why_this_exercise": "CRITICAL - Explain how this addresses specific gap from visual analysis",' : '"why_this_exercise": "How this supports the stated fitness goal",'}
+            "form_cues": [
+              "Key technique point 1",
+              "Key technique point 2"
+            ],
+            "substitutions": [
+              "Alternative if equipment unavailable"
+            ]
+          }
+        ],
+        
+        "cooldown": [
+          "Static stretches for worked muscles",
+          "5 min light cardio",
+          "Foam rolling"
+        ]
+      }
+    ],
+    
+    "progression_rules": [
+      "If completing all reps with good form, increase weight by 2.5-5 lbs",
+      "Track all workouts for progressive overload",
+      "Deload every 4-6 weeks (reduce weight 40%, maintain frequency)"
+    ],
+    
+    "cardio_and_conditioning": {
+      "sessions_per_week": 2-4,
+      "type": ["LISS", "HIIT"],
+      "duration_minutes_each": 20-30,
+      "why_this_cardio": "Based on ${profile.fitness_goal} - explanation",
+      "timing_recommendation": "Separate from weights by 6+ hours or after weights"
+    }
+  },
+  
+  "recovery_and_steps": {
+    "steps_target_range": { "min": number, "max": number },
+    "why_these_steps": "Based on ${profile.fitness_goal} and activity level",
+    "sleep_target_hours_range": { "min": 7, "max": 9 },
+    "sleep_priority": "Sleep is when growth happens - aim for ${age < 25 ? '8-9' : '7-8'} hours"
+  },
+  
+  "nutrition": {
+    "goal": "${profile.fitness_goal}",
+    
+    "calorie_target_range": {
+      "min": number,
+      "max": number
+    },
+    
+    "calorie_rationale": "Based on BMR ${bmr}, TDEE ${tdee}. ${profile.fitness_goal.includes('Lose') ? 'Deficit of 15-20% for fat loss' : profile.fitness_goal.includes('Build') ? 'Surplus of 10-15% for muscle gain' : 'Maintenance for recomposition'}",
+    
+    "macros_grams": {
+      "protein": number,
+      "carbs": number,
+      "fat": number
+    },
+    
+    "macro_rationale": "Protein: ~1g per lb bodyweight. Carbs: ${profile.fitness_goal.includes('Build') ? 'Higher for fuel' : 'Moderate for energy'}. Fats: Adequate for hormones.",
+    
+    "example_day": {
+      "breakfast": ["Item 1", "Item 2"],
+      "lunch": ["Item 1", "Item 2"],
+      "dinner": ["Item 1", "Item 2"],
+      "snacks": ["Item 1", "Item 2"]
+    }
+  }
+}
+
+CRITICAL REMINDERS:
+1. Output ONLY valid JSON (no markdown, no commentary)
+2. ${hasPhotos ? 'Every exercise MUST have "why_this_exercise" connecting to visual gap analysis' : 'Explain why each exercise supports the stated goal'}
+3. Use ONLY the equipment available (or bodyweight if none)
+4. Generate for EXACTLY ${daysPerWeek} days per week
+5. Be realistic with timelines based on vitals and experience
+6. ${hasPhotos ? 'Personalized motivation must reference specific visual observations' : 'Keep general but motivating'}
+
+Generate the complete plan now.`
+}
+</file>
+
+<file path="app/api/initialize-stats/route.ts">
+import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
+
+// Calculate XP required for next level (RPG-style exponential curve)
+function getXPForLevel(level: number): number {
+  return Math.floor(100 * Math.pow(level, 1.5))
+}
+
+// Calculate current level based on total XP
+function getLevelFromXP(totalXP: number): number {
+  let level = 1
+  let xpNeeded = 0
+  
+  while (xpNeeded <= totalXP) {
+    level++
+    xpNeeded += getXPForLevel(level - 1)
+  }
+  
+  return level - 1
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    // Get auth token
+    const authHeader = request.headers.get('authorization')
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      )
+    }
+
+    const accessToken = authHeader.replace('Bearer ', '')
+
+    // Create Supabase client
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        global: {
+          headers: {
+            Authorization: `Bearer ${accessToken}`
+          }
+        }
+      }
+    )
+
+    // Get user
+    const { data: { user }, error: authError } = await supabase.auth.getUser(accessToken)
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      )
+    }
+
+    // Check if user_stats already exists
+    const { data: existingStats } = await supabase
+      .from('user_stats')
+      .select('*')
+      .eq('user_id', user.id)
+      .single()
+
+    if (existingStats) {
+      return NextResponse.json({
+        message: 'Stats already initialized',
+        stats: existingStats
+      })
+    }
+
+    // Get active plan to determine plan start date
+    const { data: activePlan } = await supabase
+      .from('user_plans')
+      .select('created_at')
+      .eq('user_id', user.id)
+      .eq('status', 'active')
+      .single()
+
+    const planStartDate = activePlan?.created_at 
+      ? new Date(activePlan.created_at).toISOString().split('T')[0]
+      : new Date().toISOString().split('T')[0]
+
+    // Initialize user_stats
+    const startingXP = 100 // Starting XP for creating account
+    const startingLevel = getLevelFromXP(startingXP)
+    
+    const { data: stats, error: statsError } = await supabase
+      .from('user_stats')
+      .insert({
+        user_id: user.id,
+        plan_start_date: planStartDate,
+        current_week: 1,
+        total_workouts_completed: 0,
+        total_workouts_planned: 0,
+        current_streak_days: 0,
+        longest_streak_days: 0,
+        total_xp: startingXP,
+        level: startingLevel,
+        total_badges_earned: 0,
+        current_x_percent: 0,
+        best_x_percent: 0,
+        average_x_percent: 0
+      })
+      .select()
+      .single()
+
+    if (statsError) {
+      console.error('Error creating stats:', statsError)
+      return NextResponse.json(
+        { error: 'Failed to initialize stats', details: statsError.message },
+        { status: 500 }
+      )
+    }
+
+    // Award "Journey Begins" badge
+    const badgeXP = 100
+    const { data: firstBadge, error: badgeError } = await supabase
+      .from('user_badges')
+      .insert({
+        user_id: user.id,
+        badge_key: 'journey_begins',
+        badge_name: 'Journey Begins',
+        badge_description: 'Generated your first AI-powered fitness plan',
+        badge_tier: 'bronze',
+        theme_exclusive: null, // Universal badge
+        xp_earned: badgeXP,
+        progress_current: 1,
+        progress_required: 1
+      })
+      .select()
+      .single()
+
+    // Update total XP and level with badge XP
+    if (!badgeError) {
+      const newTotalXP = startingXP + badgeXP
+      const newLevel = getLevelFromXP(newTotalXP)
+      
+      await supabase
+        .from('user_stats')
+        .update({ 
+          total_badges_earned: 1,
+          total_xp: newTotalXP,
+          level: newLevel
+        })
+        .eq('user_id', user.id)
+    }
+
+    // Initialize Week 1 progress
+    const today = new Date()
+    const weekStart = new Date(planStartDate)
+    const weekEnd = new Date(weekStart)
+    weekEnd.setDate(weekEnd.getDate() + 6)
+
+    const { data: weekProgress, error: progressError } = await supabase
+      .from('user_progress')
+      .insert({
+        user_id: user.id,
+        week_number: 1,
+        week_start_date: weekStart.toISOString().split('T')[0],
+        week_end_date: weekEnd.toISOString().split('T')[0],
+        workouts_planned: 4, // Default from plan
+        workouts_completed: 0,
+        current_streak_days: 0,
+        step_goal_days_hit: 0,
+        step_goal_days_total: 7,
+        x_percent_better: 0
+      })
+      .select()
+      .single()
+
+    return NextResponse.json({
+      success: true,
+      stats,
+      firstBadge,
+      weekProgress,
+      xpSystem: {
+        currentLevel: stats.level,
+        totalXP: stats.total_xp,
+        xpForNextLevel: getXPForLevel(stats.level),
+        xpProgress: stats.total_xp % getXPForLevel(stats.level)
+      },
+      message: 'Stats initialized! You earned your first badge! 🎉'
+    })
+
+  } catch (error: any) {
+    console.error('Initialization error:', error)
+    return NextResponse.json(
+      { error: 'Failed to initialize', details: error.message },
+      { status: 500 }
+    )
+  }
+}
+</file>
+
+<file path="app/api/test-auth/route.ts">
+import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@supabase/supabase-js'
+
+export async function GET(request: NextRequest) {
+  try {
+    // Get all cookies
+    const cookieStore = request.cookies
+    const allCookies = cookieStore.getAll()
+    
+    console.log('=== AUTH DEBUG ===')
+    console.log('Total cookies:', allCookies.length)
+    console.log('Cookie names:', allCookies.map(c => c.name))
+    
+    // Try to find any Supabase cookies
+    const supabaseCookies = allCookies.filter(c => 
+      c.name.includes('supabase') || 
+      c.name.includes('sb-') ||
+      c.name.includes('auth')
+    )
+    
+    console.log('Supabase-related cookies:', supabaseCookies.map(c => c.name))
+    
+    // Create Supabase client
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    )
+    
+    // Try multiple ways to get the user
+    let user = null
+    let method = 'none'
+    
+    // Method 1: Try each cookie
+    for (const cookie of supabaseCookies) {
+      try {
+        const { data, error } = await supabase.auth.getUser(cookie.value)
+        if (data?.user && !error) {
+          user = data.user
+          method = `cookie: ${cookie.name}`
+          break
+        }
+      } catch (e) {
+        // Continue to next cookie
+      }
+    }
+    
+    // Method 2: Try without token (session from cookies)
+    if (!user) {
+      try {
+        const { data, error } = await supabase.auth.getUser()
+        if (data?.user && !error) {
+          user = data.user
+          method = 'getUser() without token'
+        }
+      } catch (e) {
+        // Failed
+      }
+    }
+    
+    return NextResponse.json({
+      success: !!user,
+      method: method,
+      user: user ? {
+        id: user.id,
+        email: user.email
+      } : null,
+      cookies: allCookies.map(c => ({
+        name: c.name,
+        hasValue: !!c.value,
+        valueLength: c.value.length
+      })),
+      supabaseCookies: supabaseCookies.map(c => c.name)
+    })
+    
+  } catch (error: any) {
+    console.error('Test error:', error)
+    return NextResponse.json({
+      error: error.message,
+      stack: error.stack
+    }, { status: 500 })
+  }
+}
+</file>
+
+<file path="app/dashboard/page.tsx.backup">
+'use client'
+
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { useAuth } from '@/components/AuthProvider'
+import { useTheme } from '@/components/ThemeProvider'
+import { ThemeSwitcher } from '@/components/ThemeSwitcher'
+import { supabaseBrowser } from '@/lib/supabaseClient'
+
+interface UserProfile {
+  id: string
+  user_id: string
+  full_name: string
+  age: number
+  gender: string
+  fitness_goal: string
+  experience_level: string
+  available_equipment: string[]
+  workout_frequency: string
+  has_completed_onboarding: boolean
+  created_at: string
+}
+
+export default function DashboardPage() {
+  const { user, loading: authLoading, signOut } = useAuth()
+  const { themeConfig } = useTheme()
+  const router = useRouter()
+  
+  const [profile, setProfile] = useState<UserProfile | null>(null)
+  const [profileLoading, setProfileLoading] = useState(true)
+  const [profileError, setProfileError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push('/login')
+    }
+  }, [user, authLoading, router])
+
+  useEffect(() => {
+    const fetchProfile = async () => {
+      if (!user) return
+
+      try {
+        setProfileLoading(true)
+        setProfileError(null)
+
+        const { data, error } = await supabaseBrowser
+          .from('user_profiles')
+          .select('*')
+          .eq('user_id', user.id)
+          .single()
+
+        if (error) {
+          if (error.code === 'PGRST116') {
+            setProfile(null)
+          } else {
+            throw error
+          }
+        } else {
+          setProfile(data)
+        }
+      } catch (err: any) {
+        console.error('Error fetching profile:', err)
+        setProfileError(err.message || 'Failed to load profile')
+      } finally {
+        setProfileLoading(false)
+      }
+    }
+
+    if (user) {
+      fetchProfile()
+    }
+  }, [user])
+
+  if (authLoading || profileLoading) {
+    return (
+      <div 
+        className="min-h-screen flex items-center justify-center"
+        style={{ background: 'var(--bgPrimary)' }}
+      >
+        <div className="text-center space-y-4">
+          <div 
+            className="text-2xl font-bold"
+            style={{ color: 'var(--textPrimary)' }}
+          >
+            Loading your dashboard...
+          </div>
+          <div 
+            className="w-12 h-12 border-4 border-t-transparent rounded-full animate-spin mx-auto"
+            style={{ borderColor: 'var(--accent1)', borderTopColor: 'transparent' }}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return null
+  }
+
+  if (profileError) {
+    return (
+      <div 
+        className="min-h-screen p-8 transition-all duration-500"
+        style={{ background: 'var(--bgPrimary)' }}
+      >
+        <div className="max-w-6xl mx-auto">
+          <div
+            className="themed-card p-8 border-2"
+            style={{
+              backgroundColor: 'var(--bgCard)',
+              borderColor: '#EF4444',
+            }}
+          >
+            <h2 
+              className="text-2xl font-bold mb-4"
+              style={{ color: '#EF4444' }}
+            >
+              Error Loading Profile
+            </h2>
+            <p style={{ color: 'var(--textSecondary)' }}>
+              {profileError}
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 px-6 py-3 rounded-lg font-bold transition-all duration-300 hover:opacity-80"
+              style={{
+                background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+                color: '#FFFFFF',
+              }}
+            >
+              Try Again
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div 
+      className="min-h-screen p-8 transition-all duration-500"
+      style={{ background: 'var(--bgPrimary)' }}
+    >
+      <div className="max-w-6xl mx-auto space-y-8">
+        
+        <div className="flex justify-between items-start flex-wrap gap-4">
+          <div>
+            <h1 
+              className="text-4xl font-bold mb-2"
+              style={{
+                background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+              }}
+            >
+              {profile ? `Welcome back, ${profile.full_name}!` : 'Welcome to Apex Fitness Coach'}
+            </h1>
+            <p style={{ color: 'var(--textSecondary)' }}>
+              {user.email}
+            </p>
+          </div>
+
+          <button
+            onClick={signOut}
+            className="px-6 py-3 rounded-lg font-bold transition-all duration-300 hover:opacity-80"
+            style={{
+              background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+              color: '#FFFFFF',
+            }}
+          >
+            Sign Out
+          </button>
+        </div>
+
+        {!profile && (
+          <div
+            className="themed-card p-8 border-2 text-center"
+            style={{
+              backgroundColor: 'var(--bgCard)',
+              borderColor: 'var(--borderColor)',
+            }}
+          >
+            <div className="space-y-6">
+              <div>
+                <div 
+                  className="text-6xl mb-4"
+                  style={{ color: 'var(--accent1)' }}
+                >
+                  👋
+                </div>
+                <h2 
+                  className="text-3xl font-bold mb-2"
+                  style={{ color: 'var(--textPrimary)' }}
+                >
+                  Let's Get You Started!
+                </h2>
+                <p 
+                  className="text-lg"
+                  style={{ color: 'var(--textSecondary)' }}
+                >
+                  Complete your profile so we can build your personalized fitness plan
+                </p>
+              </div>
+
+              <Link href="/onboarding">
+                <button
+                  className="px-8 py-4 rounded-lg font-bold text-lg transition-all duration-300 hover:scale-105"
+                  style={{
+                    background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+                    color: '#FFFFFF',
+                  }}
+                >
+                  Complete Your Profile →
+                </button>
+              </Link>
+
+              <div className="pt-6 border-t" style={{ borderColor: 'var(--borderColor)' }}>
+                <p 
+                  className="text-sm"
+                  style={{ color: 'var(--textSecondary)' }}
+                >
+                  Takes less than 2 minutes • 4 simple questions
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {profile && (
+          <>
+            <div
+              className="themed-card p-8 border-2"
+              style={{
+                backgroundColor: 'var(--bgCard)',
+                borderColor: 'var(--borderColor)',
+              }}
+            >
+              <div className="flex justify-between items-start mb-6">
+                <h2 
+                  className="text-2xl font-bold"
+                  style={{ color: 'var(--accent1)' }}
+                >
+                  Your Profile
+                </h2>
+                <button
+                  className="px-4 py-2 rounded-lg font-semibold text-sm border-2 transition-all duration-300 hover:opacity-80"
+                  style={{
+                    borderColor: 'var(--accent1)',
+                    color: 'var(--accent1)',
+                  }}
+                >
+                  Edit Profile
+                </button>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <div>
+                    <p 
+                      className="text-sm font-semibold mb-1"
+                      style={{ color: 'var(--textSecondary)' }}
+                    >
+                      Age
+                    </p>
+                    <p 
+                      className="text-lg font-bold"
+                      style={{ color: 'var(--textPrimary)' }}
+                    >
+                      {profile.age} years old
+                    </p>
+                  </div>
+
+                  <div>
+                    <p 
+                      className="text-sm font-semibold mb-1"
+                      style={{ color: 'var(--textSecondary)' }}
+                    >
+                      Gender
+                    </p>
+                    <p 
+                      className="text-lg font-bold"
+                      style={{ color: 'var(--textPrimary)' }}
+                    >
+                      {profile.gender}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p 
+                      className="text-sm font-semibold mb-1"
+                      style={{ color: 'var(--textSecondary)' }}
+                    >
+                      Experience Level
+                    </p>
+                    <p 
+                      className="text-lg font-bold"
+                      style={{ color: 'var(--textPrimary)' }}
+                    >
+                      {profile.experience_level}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <p 
+                      className="text-sm font-semibold mb-1"
+                      style={{ color: 'var(--textSecondary)' }}
+                    >
+                      Primary Goal
+                    </p>
+                    <p 
+                      className="text-lg font-bold"
+                      style={{ color: 'var(--textPrimary)' }}
+                    >
+                      {profile.fitness_goal}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p 
+                      className="text-sm font-semibold mb-1"
+                      style={{ color: 'var(--textSecondary)' }}
+                    >
+                      Training Frequency
+                    </p>
+                    <p 
+                      className="text-lg font-bold"
+                      style={{ color: 'var(--textPrimary)' }}
+                    >
+                      {profile.workout_frequency}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p 
+                      className="text-sm font-semibold mb-1"
+                      style={{ color: 'var(--textSecondary)' }}
+                    >
+                      Available Equipment
+                    </p>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {profile.available_equipment.map((equipment) => (
+                        <span
+                          key={equipment}
+                          className="px-3 py-1 rounded-full text-sm font-semibold"
+                          style={{
+                            backgroundColor: 'var(--bgSecondary)',
+                            color: 'var(--accent2)',
+                          }}
+                        >
+                          {equipment}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div
+              className="themed-card p-8 border-2"
+              style={{
+                backgroundColor: 'var(--bgCard)',
+                borderColor: 'var(--borderColor)',
+              }}
+            >
+              <h3 
+                className="text-xl font-bold mb-4"
+                style={{ color: 'var(--accent2)' }}
+              >
+                🚀 What's Next?
+              </h3>
+              <div className="space-y-3" style={{ color: 'var(--textSecondary)' }}>
+                <p>✅ Profile complete!</p>
+                <p>📸 Next: Upload your current and goal physique photos</p>
+                <p>🤖 Then: AI will generate your personalized plan</p>
+                <p>💪 After that: Start crushing your workouts!</p>
+              </div>
+              
+              <div className="mt-6 pt-6 border-t" style={{ borderColor: 'var(--borderColor)' }}>
+                <p 
+                  className="text-sm font-semibold mb-3"
+                  style={{ color: 'var(--textPrimary)' }}
+                >
+                  Current Phase Status:
+                </p>
+                <p 
+                  className="text-sm"
+                  style={{ color: 'var(--textSecondary)' }}
+                >
+                  Phase 2 Day 2 Complete: Profile data is now displayed on your dashboard!
+                </p>
+              </div>
+            </div>
+          </>
+        )}
+
+        <div className="space-y-4">
+          <h2 
+            className="text-2xl font-bold"
+            style={{ color: 'var(--textPrimary)' }}
+          >
+            Choose Your Theme
+          </h2>
+          <ThemeSwitcher />
+        </div>
+
+      </div>
+    </div>
+  )
+}
 </file>
 
 <file path="app/login/page.tsx">
@@ -476,6 +2157,455 @@ export default function Home() {
             </p>
           </Card>
         </div>
+      </div>
+    </div>
+  )
+}
+</file>
+
+<file path="app/photos/upload/page.tsx">
+'use client'
+
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { useAuth } from '@/components/AuthProvider'
+import { useTheme } from '@/components/ThemeProvider'
+import { supabaseBrowser } from '@/lib/supabaseClient'
+
+type PhotoType = 'front' | 'back' | 'side' | 'flexed' | 'relaxed'
+
+interface CurrentPhoto {
+  file: File
+  preview: string
+  type: PhotoType
+}
+
+interface GoalPhoto {
+  file: File
+  preview: string
+  description: string
+}
+
+export default function PhotoUploadPage() {
+  const router = useRouter()
+  const { user } = useAuth()
+  const { themeConfig } = useTheme()
+  
+  const [currentPhotos, setCurrentPhotos] = useState<CurrentPhoto[]>([])
+  const [goalPhoto, setGoalPhoto] = useState<GoalPhoto | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleCurrentPhotoUpload = (files: FileList | null, type: PhotoType) => {
+    if (!files || files.length === 0) return
+    
+    const file = files[0]
+    
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      setError('Please upload an image file')
+      return
+    }
+    
+    // Validate file size (5MB max)
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Image must be less than 5MB')
+      return
+    }
+    
+    // Create preview
+    const preview = URL.createObjectURL(file)
+    
+    // Add to current photos (max 5)
+    if (currentPhotos.length >= 5) {
+      setError('Maximum 5 current photos allowed')
+      return
+    }
+    
+    setCurrentPhotos(prev => [...prev, { file, preview, type }])
+    setError(null)
+  }
+
+  const handleGoalPhotoUpload = (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    
+    const file = files[0]
+    
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      setError('Please upload an image file')
+      return
+    }
+    
+    // Validate file size (5MB max)
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Image must be less than 5MB')
+      return
+    }
+    
+    // Create preview
+    const preview = URL.createObjectURL(file)
+    
+    setGoalPhoto({ file, preview, description: '' })
+    setError(null)
+  }
+
+  const removeCurrentPhoto = (index: number) => {
+    setCurrentPhotos(prev => {
+      // Revoke object URL to prevent memory leak
+      URL.revokeObjectURL(prev[index].preview)
+      return prev.filter((_, i) => i !== index)
+    })
+  }
+
+  const removeGoalPhoto = () => {
+    if (goalPhoto) {
+      URL.revokeObjectURL(goalPhoto.preview)
+      setGoalPhoto(null)
+    }
+  }
+
+  const handleSubmit = async () => {
+    if (currentPhotos.length === 0) {
+      setError('Please upload at least 1 current photo')
+      return
+    }
+    
+    if (!goalPhoto) {
+      setError('Please upload a goal photo')
+      return
+    }
+    
+    setUploading(true)
+    setError(null)
+    
+    try {
+      const userId = user?.id
+      if (!userId) throw new Error('User not authenticated')
+      
+      // Upload current photos
+      for (let i = 0; i < currentPhotos.length; i++) {
+        const photo = currentPhotos[i]
+        const timestamp = Date.now()
+        const filename = `current_${photo.type}_${timestamp}_${i}.${photo.file.name.split('.').pop()}`
+        const filepath = `${userId}/${filename}`
+        
+        // Upload to Supabase Storage
+        const { error: uploadError } = await supabaseBrowser.storage
+          .from('physique-photos')
+          .upload(filepath, photo.file)
+        
+        if (uploadError) throw uploadError
+        
+        // Get public URL
+        const { data: { publicUrl } } = supabaseBrowser.storage
+          .from('physique-photos')
+          .getPublicUrl(filepath)
+        
+        // Save to database
+        const { error: dbError } = await supabaseBrowser
+          .from('user_current_photos')
+          .insert({
+            user_id: userId,
+            photo_url: publicUrl,
+            photo_type: photo.type,
+            is_primary: i === 0 // First photo is primary
+          })
+        
+        if (dbError) throw dbError
+      }
+      
+      // Upload goal photo
+      const timestamp = Date.now()
+      const goalFilename = `goal_${timestamp}.${goalPhoto.file.name.split('.').pop()}`
+      const goalFilepath = `${userId}/${goalFilename}`
+      
+      const { error: goalUploadError } = await supabaseBrowser.storage
+        .from('physique-photos')
+        .upload(goalFilepath, goalPhoto.file)
+      
+      if (goalUploadError) throw goalUploadError
+      
+      // Get public URL
+      const { data: { publicUrl: goalPublicUrl } } = supabaseBrowser.storage
+        .from('physique-photos')
+        .getPublicUrl(goalFilepath)
+      
+      // Save to database
+      const { error: goalDbError } = await supabaseBrowser
+        .from('user_goal_photos')
+        .insert({
+          user_id: userId,
+          photo_url: goalPublicUrl,
+          description: goalPhoto.description || null
+        })
+      
+      if (goalDbError) throw goalDbError
+      
+      // Success! Redirect to dashboard
+      // TODO: In future, redirect to AI analysis page first
+      router.push('/dashboard')
+      
+    } catch (err: any) {
+      console.error('Upload error:', err)
+      setError(err.message || 'Failed to upload photos')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleSkip = () => {
+    router.push('/dashboard')
+  }
+
+  return (
+    <div 
+      className="min-h-screen p-8 transition-all duration-500"
+      style={{ background: 'var(--bgPrimary)' }}
+    >
+      <div className="max-w-4xl mx-auto space-y-8">
+        
+        {/* Header */}
+        <div className="text-center space-y-4">
+          <h1 
+            className="text-4xl font-bold"
+            style={{
+              background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+            }}
+          >
+            Show Us Where You're Starting 📸
+          </h1>
+          <p className="text-lg" style={{ color: 'var(--textSecondary)' }}>
+            Upload photos of your current physique and your goal. Our AI will analyze the gap and build your personalized plan.
+          </p>
+        </div>
+
+        {/* Current Photos Section */}
+        <div
+          className="themed-card p-8 border-2 space-y-6"
+          style={{
+            backgroundColor: 'var(--bgCard)',
+            borderColor: 'var(--borderColor)',
+          }}
+        >
+          <div>
+            <h2 
+              className="text-2xl font-bold mb-2"
+              style={{ color: 'var(--accent1)' }}
+            >
+              Your Current Physique
+            </h2>
+            <p className="text-sm" style={{ color: 'var(--textSecondary)' }}>
+              Upload 1-5 photos (front, back, side views recommended for best analysis)
+            </p>
+          </div>
+
+          {/* Upload Buttons */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {(['front', 'back', 'side', 'flexed', 'relaxed'] as PhotoType[]).map((type) => (
+              <div key={type}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  id={`current-${type}`}
+                  className="hidden"
+                  onChange={(e) => handleCurrentPhotoUpload(e.target.files, type)}
+                />
+                <label
+                  htmlFor={`current-${type}`}
+                  className="block px-4 py-3 rounded-lg border-2 text-center font-semibold cursor-pointer transition-all duration-300 hover:scale-105"
+                  style={{
+                    backgroundColor: 'var(--bgSecondary)',
+                    borderColor: 'var(--borderColor)',
+                    color: 'var(--textPrimary)',
+                  }}
+                >
+                  <div className="text-2xl mb-1">📷</div>
+                  <div className="text-xs capitalize">{type}</div>
+                </label>
+              </div>
+            ))}
+          </div>
+
+          {/* Current Photos Preview */}
+          {currentPhotos.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="font-semibold" style={{ color: 'var(--textPrimary)' }}>
+                Uploaded ({currentPhotos.length}/5)
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                {currentPhotos.map((photo, index) => (
+                  <div key={index} className="relative group">
+                    <img
+                      src={photo.preview}
+                      alt={`Current ${photo.type}`}
+                      className="w-full h-40 object-cover rounded-lg border-2"
+                      style={{ borderColor: 'var(--borderColor)' }}
+                    />
+                    <div className="absolute top-2 left-2 px-2 py-1 rounded text-xs font-semibold" style={{ backgroundColor: 'var(--accent1)', color: '#fff' }}>
+                      {photo.type}
+                    </div>
+                    <button
+                      onClick={() => removeCurrentPhoto(index)}
+                      className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      style={{ backgroundColor: '#EF4444', color: '#fff' }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Goal Photo Section */}
+        <div
+          className="themed-card p-8 border-2 space-y-6"
+          style={{
+            backgroundColor: 'var(--bgCard)',
+            borderColor: 'var(--borderColor)',
+          }}
+        >
+          <div>
+            <h2 
+              className="text-2xl font-bold mb-2"
+              style={{ color: 'var(--accent2)' }}
+            >
+              Your Goal Physique
+            </h2>
+            <p className="text-sm" style={{ color: 'var(--textSecondary)' }}>
+              Upload a photo of your goal body (celebrity, athlete, or personal inspiration)
+            </p>
+          </div>
+
+          {!goalPhoto ? (
+            <div>
+              <input
+                type="file"
+                accept="image/*"
+                id="goal-photo"
+                className="hidden"
+                onChange={(e) => handleGoalPhotoUpload(e.target.files)}
+              />
+              <label
+                htmlFor="goal-photo"
+                className="block w-full p-12 rounded-lg border-2 border-dashed text-center cursor-pointer transition-all duration-300 hover:scale-102"
+                style={{
+                  borderColor: 'var(--borderColor)',
+                  backgroundColor: 'var(--bgSecondary)',
+                }}
+              >
+                <div className="text-6xl mb-4">🎯</div>
+                <div className="font-bold text-lg mb-2" style={{ color: 'var(--textPrimary)' }}>
+                  Click to Upload Goal Photo
+                </div>
+                <div className="text-sm" style={{ color: 'var(--textSecondary)' }}>
+                  JPG, PNG, or WebP • Max 5MB
+                </div>
+              </label>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="relative group">
+                <img
+                  src={goalPhoto.preview}
+                  alt="Goal physique"
+                  className="w-full max-w-md mx-auto rounded-lg border-2"
+                  style={{ borderColor: 'var(--borderColor)' }}
+                />
+                <button
+                  onClick={removeGoalPhoto}
+                  className="absolute top-4 right-4 px-4 py-2 rounded-lg font-semibold opacity-0 group-hover:opacity-100 transition-opacity"
+                  style={{ backgroundColor: '#EF4444', color: '#fff' }}
+                >
+                  Remove
+                </button>
+              </div>
+              
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold" style={{ color: 'var(--textPrimary)' }}>
+                  Who is this? (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={goalPhoto.description}
+                  onChange={(e) => setGoalPhoto({ ...goalPhoto, description: e.target.value })}
+                  className="w-full px-4 py-3 rounded-lg border-2"
+                  style={{
+                    backgroundColor: 'var(--bgSecondary)',
+                    borderColor: 'var(--borderColor)',
+                    color: 'var(--textPrimary)',
+                  }}
+                  placeholder="e.g., Michael B Jordan - Creed 2, Chris Hemsworth - Thor"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Error Message */}
+        {error && (
+          <div 
+            className="p-4 rounded-lg border-2"
+            style={{
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              borderColor: '#EF4444',
+              color: '#EF4444',
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        {/* Action Buttons */}
+        <div className="flex gap-4">
+          <button
+            onClick={handleSkip}
+            disabled={uploading}
+            className="px-6 py-3 rounded-lg font-semibold border-2 transition-all duration-300 hover:opacity-80"
+            style={{
+              borderColor: 'var(--borderColor)',
+              color: 'var(--textSecondary)',
+            }}
+          >
+            Skip for Now
+          </button>
+          
+          <button
+            onClick={handleSubmit}
+            disabled={uploading || currentPhotos.length === 0 || !goalPhoto}
+            className="flex-1 px-6 py-4 rounded-lg font-bold text-lg transition-all duration-300 hover:scale-105"
+            style={{
+              background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+              color: '#FFFFFF',
+              opacity: uploading || currentPhotos.length === 0 || !goalPhoto ? 0.5 : 1,
+              cursor: uploading || currentPhotos.length === 0 || !goalPhoto ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {uploading ? 'Uploading Photos...' : 'Analyze My Physique 🚀'}
+          </button>
+        </div>
+
+        {/* Help Text */}
+        <div 
+          className="text-center text-sm p-4 rounded-lg"
+          style={{
+            backgroundColor: 'var(--bgSecondary)',
+            color: 'var(--textSecondary)',
+          }}
+        >
+          <p className="mb-2">
+            💡 <strong>Pro Tip:</strong> Good lighting and clear poses help our AI give you the most accurate analysis and timeline!
+          </p>
+          <p>
+            Your photos are private and secure. Only you can see them.
+          </p>
+        </div>
+
       </div>
     </div>
   )
@@ -1571,178 +3701,6 @@ export default config;
 }
 </file>
 
-<file path="app/dashboard/page.tsx">
-'use client'
-
-import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { useAuth } from '@/components/AuthProvider'
-import { useTheme } from '@/components/ThemeProvider'
-import { ThemeSwitcher } from '@/components/ThemeSwitcher'
-
-export default function DashboardPage() {
-  const { user, loading, signOut } = useAuth()
-  const { themeConfig } = useTheme()
-  const router = useRouter()
-
-  // Redirect if not logged in
-  useEffect(() => {
-    if (!loading && !user) {
-      router.push('/login')
-    }
-  }, [user, loading, router])
-
-  // Show loading while checking auth
-  if (loading) {
-    return (
-      <div 
-        className="min-h-screen flex items-center justify-center"
-        style={{ background: 'var(--bgPrimary)' }}
-      >
-        <div style={{ color: 'var(--textPrimary)' }}>
-          Loading...
-        </div>
-      </div>
-    )
-  }
-
-  // Don't render if no user (will redirect)
-  if (!user) {
-    return null
-  }
-
-  return (
-    <div 
-      className="min-h-screen p-8 transition-all duration-500"
-      style={{ background: 'var(--bgPrimary)' }}
-    >
-      <div className="max-w-6xl mx-auto space-y-8">
-        
-        {/* Header */}
-        <div className="flex justify-between items-start">
-          <div>
-            <h1 
-              className="text-4xl font-bold mb-2"
-              style={{
-                background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-              }}
-            >
-              Welcome to Your Dashboard
-            </h1>
-            <p style={{ color: 'var(--textSecondary)' }}>
-              Logged in as: {user.email}
-            </p>
-          </div>
-
-          {/* Logout Button */}
-          <button
-            onClick={signOut}
-            className="px-6 py-3 rounded-lg font-bold transition-all duration-300 hover:opacity-80"
-            style={{
-              background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
-              color: '#FFFFFF',
-            }}
-          >
-            Sign Out
-          </button>
-        </div>
-
-        {/* Theme Switcher */}
-        <div className="space-y-4">
-          <h2 
-            className="text-2xl font-bold"
-            style={{ color: 'var(--textPrimary)' }}
-          >
-            Choose Your Theme
-          </h2>
-          <ThemeSwitcher />
-        </div>
-
-        {/* Welcome Card */}
-        <div
-          className="themed-card p-8 border-2"
-          style={{
-            backgroundColor: 'var(--bgCard)',
-            borderColor: 'var(--borderColor)',
-          }}
-        >
-          <h3 
-            className="text-2xl font-bold mb-4"
-            style={{ color: 'var(--accent1)' }}
-          >
-            🎉 Authentication Complete!
-          </h3>
-          <div className="space-y-3" style={{ color: 'var(--textSecondary)' }}>
-            <p>✅ You successfully created an account</p>
-            <p>✅ You successfully logged in</p>
-            <p>✅ This page is protected (requires login)</p>
-            <p>✅ You can sign out using the button above</p>
-            <p>✅ Themes work across all pages</p>
-          </div>
-        </div>
-
-        {/* Status Card */}
-        <div
-          className="themed-card p-8 border-2"
-          style={{
-            backgroundColor: 'var(--bgCard)',
-            borderColor: 'var(--borderColor)',
-          }}
-        >
-          <h3 
-            className="text-xl font-bold mb-4"
-            style={{ color: 'var(--textPrimary)' }}
-          >
-            Your Profile
-          </h3>
-          <div className="space-y-2" style={{ color: 'var(--textSecondary)' }}>
-            <p><strong style={{ color: 'var(--textPrimary)' }}>Email:</strong> {user.email}</p>
-            <p><strong style={{ color: 'var(--textPrimary)' }}>User ID:</strong> {user.id}</p>
-            <p><strong style={{ color: 'var(--textPrimary)' }}>Current Theme:</strong> {themeConfig.displayName}</p>
-          </div>
-        </div>
-
-        {/* Next Steps */}
-        <div
-          className="themed-card p-8 border-2"
-          style={{
-            backgroundColor: 'var(--bgCard)',
-            borderColor: 'var(--borderColor)',
-          }}
-        >
-          <h3 
-            className="text-xl font-bold mb-4"
-            style={{ color: 'var(--accent2)' }}
-          >
-            🚀 Phase 1 Complete!
-          </h3>
-          <div className="space-y-2" style={{ color: 'var(--textSecondary)' }}>
-            <p><strong style={{ color: 'var(--textPrimary)' }}>What we built:</strong></p>
-            <ul className="list-disc list-inside space-y-1 ml-4">
-              <li>4-theme system (Cyberpunk, Bee, Pastel, Minimal)</li>
-              <li>Theme switching with persistence</li>
-              <li>User authentication (signup/login/logout)</li>
-              <li>Protected routes</li>
-              <li>Session management</li>
-            </ul>
-            <p className="mt-4"><strong style={{ color: 'var(--textPrimary)' }}>Next up (Phase 2):</strong></p>
-            <ul className="list-disc list-inside space-y-1 ml-4">
-              <li>Onboarding flow</li>
-              <li>User profile setup</li>
-              <li>Goal setting</li>
-            </ul>
-          </div>
-        </div>
-
-      </div>
-    </div>
-  )
-}
-</file>
-
 <file path="app/globals.css">
 @import "tailwindcss";
 
@@ -1890,492 +3848,6 @@ body {
 }
 </file>
 
-<file path="app/onboarding/page.tsx">
-'use client'
-
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { useAuth } from '@/components/AuthProvider'
-import { useTheme } from '@/components/ThemeProvider'
-import { supabaseBrowser } from '@/lib/supabaseClient'
-
-type OnboardingStep = 1 | 2 | 3 | 4
-
-interface OnboardingData {
-  full_name: string
-  age: string
-  gender: string
-  fitness_goal: string
-  experience_level: string
-  available_equipment: string[]
-  workout_frequency: string
-}
-
-export default function OnboardingPage() {
-  const router = useRouter()
-  const { user } = useAuth()
-  const { themeConfig } = useTheme()
-  
-  const [currentStep, setCurrentStep] = useState<OnboardingStep>(1)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  
-  const [formData, setFormData] = useState<OnboardingData>({
-    full_name: '',
-    age: '',
-    gender: '',
-    fitness_goal: '',
-    experience_level: '',
-    available_equipment: [],
-    workout_frequency: '',
-  })
-
-  const handleInputChange = (field: keyof OnboardingData, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }))
-  }
-
-  const handleEquipmentToggle = (equipment: string) => {
-    setFormData(prev => ({
-      ...prev,
-      available_equipment: prev.available_equipment.includes(equipment)
-        ? prev.available_equipment.filter(e => e !== equipment)
-        : [...prev.available_equipment, equipment]
-    }))
-  }
-
-  const handleNext = () => {
-    setError(null)
-    
-    if (currentStep === 1) {
-      if (!formData.full_name || !formData.age || !formData.gender) {
-        setError("Come on, don't leave us hanging! Fill in all the fields 😊")
-        return
-      }
-      if (parseInt(formData.age) < 13 || parseInt(formData.age) > 120) {
-        setError('That age seems... off. Give us a real number!')
-        return
-      }
-    }
-    
-    if (currentStep === 2 && !formData.fitness_goal) {
-      setError('Pick one! What are we working towards? 💪')
-      return
-    }
-    
-    if (currentStep === 3 && !formData.experience_level) {
-      setError('No judgment! Where are you at right now?')
-      return
-    }
-    
-    if (currentStep < 4) {
-      setCurrentStep((currentStep + 1) as OnboardingStep)
-    }
-  }
-
-  const handleBack = () => {
-    if (currentStep > 1) {
-      setCurrentStep((currentStep - 1) as OnboardingStep)
-      setError(null)
-    }
-  }
-
-  const handleSubmit = async () => {
-    setLoading(true)
-    setError(null)
-
-    if (!formData.workout_frequency) {
-      setError('How many days can you commit? Pick one!')
-      setLoading(false)
-      return
-    }
-
-    try {
-      const { error: dbError } = await supabaseBrowser
-        .from('user_profiles')
-        .insert({
-          user_id: user?.id,
-          full_name: formData.full_name,
-          age: parseInt(formData.age),
-          gender: formData.gender,
-          fitness_goal: formData.fitness_goal,
-          experience_level: formData.experience_level,
-          available_equipment: formData.available_equipment,
-          workout_frequency: formData.workout_frequency,
-          has_completed_onboarding: true,
-        })
-
-      if (dbError) throw dbError
-
-      router.push('/dashboard')
-    } catch (err: any) {
-      setError(err.message || 'Failed to save profile')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const equipmentOptions = [
-    { name: 'Dumbbells', emoji: '💪' },
-    { name: 'Barbell', emoji: '🏋️' },
-    { name: 'Bench', emoji: '🪑' },
-    { name: 'Pull-up Bar', emoji: '🔥' },
-    { name: 'Resistance Bands', emoji: '🎗️' },
-    { name: 'Kettlebells', emoji: '⚫' },
-    { name: 'No Equipment', emoji: '🏃' }
-  ]
-
-  return (
-    <div 
-      className="min-h-screen flex items-center justify-center p-8 transition-all duration-500"
-      style={{ background: 'var(--bgPrimary)' }}
-    >
-      <div className="w-full max-w-2xl space-y-8">
-        
-        <div className="text-center space-y-2">
-          <h1 
-            className="text-4xl font-bold"
-            style={{
-              background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-            }}
-          >
-            {currentStep === 1 && "Alright, let's get to know you! 👋"}
-            {currentStep === 2 && "What's the dream? 🎯"}
-            {currentStep === 3 && "Real talk: Where are you at? 💯"}
-            {currentStep === 4 && "Last question - what's in your gym? 🏋️"}
-          </h1>
-          <p style={{ color: 'var(--textSecondary)' }}>
-            {currentStep === 1 && "No judgment, just facts. We need the basics."}
-            {currentStep === 2 && "What's the one thing you want most? Pick your mission."}
-            {currentStep === 3 && "This helps us not kill you on Day 1 😅"}
-            {currentStep === 4 && "Even if it's just your body weight, we'll make it work!"}
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          <div className="flex justify-between text-sm" style={{ color: 'var(--textSecondary)' }}>
-            <span>Question {currentStep} of 4</span>
-            <span>{currentStep * 25}% there!</span>
-          </div>
-          <div 
-            className="w-full h-2 rounded-full overflow-hidden"
-            style={{ backgroundColor: 'var(--bgSecondary)' }}
-          >
-            <div 
-              className="h-full transition-all duration-500"
-              style={{
-                width: `${currentStep * 25}%`,
-                background: `linear-gradient(90deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
-              }}
-            />
-          </div>
-        </div>
-
-        <div
-          className="themed-card p-8 border-2 space-y-6"
-          style={{
-            backgroundColor: 'var(--bgCard)',
-            borderColor: 'var(--borderColor)',
-          }}
-        >
-          
-          {currentStep === 1 && (
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <label className="block text-sm font-semibold" style={{ color: 'var(--textPrimary)' }}>
-                  What should we call you?
-                </label>
-                <input
-                  type="text"
-                  value={formData.full_name}
-                  onChange={(e) => handleInputChange('full_name', e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg border-2 transition-all duration-300"
-                  style={{
-                    backgroundColor: 'var(--bgSecondary)',
-                    borderColor: 'var(--borderColor)',
-                    color: 'var(--textPrimary)',
-                  }}
-                  placeholder="Your actual name (we won't share it!)"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-sm font-semibold" style={{ color: 'var(--textPrimary)' }}>
-                  How many trips around the sun?
-                </label>
-                <input
-                  type="number"
-                  value={formData.age}
-                  onChange={(e) => handleInputChange('age', e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg border-2 transition-all duration-300"
-                  style={{
-                    backgroundColor: 'var(--bgSecondary)',
-                    borderColor: 'var(--borderColor)',
-                    color: 'var(--textPrimary)',
-                  }}
-                  placeholder="Be honest - your body knows 😉"
-                  min="13"
-                  max="120"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="block text-sm font-semibold" style={{ color: 'var(--textPrimary)' }}>
-                  Gender (helps with workout recommendations)
-                </label>
-                <div className="grid grid-cols-3 gap-3">
-                  {['Male', 'Female', 'Other'].map((gender) => (
-                    <button
-                      key={gender}
-                      type="button"
-                      onClick={() => handleInputChange('gender', gender)}
-                      className="px-4 py-3 rounded-lg border-2 font-semibold transition-all duration-300 hover:scale-105"
-                      style={{
-                        backgroundColor: formData.gender === gender ? 'var(--accent1)' : 'var(--bgSecondary)',
-                        borderColor: formData.gender === gender ? 'var(--accent1)' : 'var(--borderColor)',
-                        color: formData.gender === gender ? '#FFFFFF' : 'var(--textPrimary)',
-                      }}
-                    >
-                      {gender}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {currentStep === 2 && (
-            <div className="space-y-6">
-              <div className="grid gap-3">
-                {[
-                  { goal: 'Lose Weight', sub: 'Get lean, feel lighter, drop fat', emoji: '🔥' },
-                  { goal: 'Build Muscle', sub: 'Pack on size, look jacked, get swole', emoji: '💪' },
-                  { goal: 'Get Stronger', sub: 'Lift heavy, hit PRs, feel powerful', emoji: '⚡' },
-                  { goal: 'Improve Endurance', sub: "Run longer, don't get winded, beast mode", emoji: '🏃' },
-                  { goal: 'General Fitness', sub: 'Just be healthier and feel good overall', emoji: '✨' },
-                  { goal: 'Athletic Performance', sub: 'Compete, dominate, win at sports', emoji: '🏆' }
-                ].map((item) => (
-                  <button
-                    key={item.goal}
-                    type="button"
-                    onClick={() => handleInputChange('fitness_goal', item.goal)}
-                    className="px-6 py-4 rounded-lg border-2 text-left transition-all duration-300 hover:scale-102"
-                    style={{
-                      backgroundColor: formData.fitness_goal === item.goal ? 'var(--accent1)' : 'var(--bgSecondary)',
-                      borderColor: formData.fitness_goal === item.goal ? 'var(--accent1)' : 'var(--borderColor)',
-                      color: formData.fitness_goal === item.goal ? '#FFFFFF' : 'var(--textPrimary)',
-                    }}
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl">{item.emoji}</span>
-                      <div className="flex-1">
-                        <div className="font-bold">{item.goal}</div>
-                        <div 
-                          className="text-sm"
-                          style={{ 
-                            color: formData.fitness_goal === item.goal ? 'rgba(255,255,255,0.9)' : 'var(--textSecondary)' 
-                          }}
-                        >
-                          {item.sub}
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {currentStep === 3 && (
-            <div className="space-y-6">
-              <div className="grid gap-3">
-                {[
-                  { level: 'Beginner', desc: 'New to this, ready to learn', emoji: '🌱', sub: "(Don't worry - everyone starts here!)" },
-                  { level: 'Intermediate', desc: '1-2 years in, got the basics down', emoji: '💪', sub: "(You know what a burpee is and hate it)" },
-                  { level: 'Advanced', desc: '3+ years, you live this lifestyle', emoji: '🔥', sub: "(Gym is basically your second home)" },
-                  { level: 'Expert', desc: 'Coach/athlete level, you could teach this', emoji: '🏆', sub: "(People ask YOU for fitness advice)" }
-                ].map((item) => (
-                  <button
-                    key={item.level}
-                    type="button"
-                    onClick={() => handleInputChange('experience_level', item.level)}
-                    className="px-6 py-4 rounded-lg border-2 text-left transition-all duration-300 hover:scale-102"
-                    style={{
-                      backgroundColor: formData.experience_level === item.level ? 'var(--accent1)' : 'var(--bgSecondary)',
-                      borderColor: formData.experience_level === item.level ? 'var(--accent1)' : 'var(--borderColor)',
-                      color: formData.experience_level === item.level ? '#FFFFFF' : 'var(--textPrimary)',
-                    }}
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="text-2xl">{item.emoji}</span>
-                      <div className="flex-1">
-                        <div className="font-bold text-lg">{item.level}</div>
-                        <div 
-                          className="text-sm mt-1"
-                          style={{ 
-                            color: formData.experience_level === item.level ? 'rgba(255,255,255,0.9)' : 'var(--textSecondary)' 
-                          }}
-                        >
-                          {item.desc}
-                        </div>
-                        <div 
-                          className="text-xs mt-1 italic"
-                          style={{ 
-                            color: formData.experience_level === item.level ? 'rgba(255,255,255,0.8)' : 'var(--textSecondary)' 
-                          }}
-                        >
-                          {item.sub}
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {currentStep === 4 && (
-            <div className="space-y-6">
-              <div className="space-y-4">
-                <p className="text-sm" style={{ color: 'var(--textSecondary)' }}>
-                  Pick all that apply - even if it's just you and the floor!
-                </p>
-
-                <div className="grid grid-cols-2 gap-3">
-                  {equipmentOptions.map((item) => (
-                    <button
-                      key={item.name}
-                      type="button"
-                      onClick={() => handleEquipmentToggle(item.name)}
-                      className="px-4 py-3 rounded-lg border-2 font-semibold transition-all duration-300 hover:scale-105"
-                      style={{
-                        backgroundColor: formData.available_equipment.includes(item.name) ? 'var(--accent1)' : 'var(--bgSecondary)',
-                        borderColor: formData.available_equipment.includes(item.name) ? 'var(--accent1)' : 'var(--borderColor)',
-                        color: formData.available_equipment.includes(item.name) ? '#FFFFFF' : 'var(--textPrimary)',
-                      }}
-                    >
-                      <span className="mr-2">{item.emoji}</span>
-                      {item.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div>
-                  <h3 
-                    className="text-xl font-bold"
-                    style={{ color: 'var(--textPrimary)' }}
-                  >
-                    How many days can you REALISTICALLY commit?
-                  </h3>
-                  <p className="text-sm mt-1" style={{ color: 'var(--textSecondary)' }}>
-                    Be honest - we'd rather you crush 3 days than skip 6!
-                  </p>
-                </div>
-
-                <div className="grid gap-3">
-                  {[
-                    { freq: '1-2 days per week', sub: 'Just starting or super busy', emoji: '🌱' },
-                    { freq: '3-4 days per week', sub: 'The sweet spot for most people', emoji: '💪' },
-                    { freq: '5-6 days per week', sub: 'You mean business', emoji: '🔥' },
-                    { freq: 'Every day', sub: 'Absolute savage mode', emoji: '🏆' }
-                  ].map((item) => (
-                    <button
-                      key={item.freq}
-                      type="button"
-                      onClick={() => handleInputChange('workout_frequency', item.freq)}
-                      className="px-6 py-3 rounded-lg border-2 text-left transition-all duration-300 hover:scale-102"
-                      style={{
-                        backgroundColor: formData.workout_frequency === item.freq ? 'var(--accent1)' : 'var(--bgSecondary)',
-                        borderColor: formData.workout_frequency === item.freq ? 'var(--accent1)' : 'var(--borderColor)',
-                        color: formData.workout_frequency === item.freq ? '#FFFFFF' : 'var(--textPrimary)',
-                      }}
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-xl">{item.emoji}</span>
-                        <div className="flex-1">
-                          <div className="font-semibold">{item.freq}</div>
-                          <div 
-                            className="text-sm"
-                            style={{ 
-                              color: formData.workout_frequency === item.freq ? 'rgba(255,255,255,0.9)' : 'var(--textSecondary)' 
-                            }}
-                          >
-                            {item.sub}
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {error && (
-            <div 
-              className="p-4 rounded-lg border-2"
-              style={{
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                borderColor: '#EF4444',
-                color: '#EF4444',
-              }}
-            >
-              {error}
-            </div>
-          )}
-
-          <div className="flex gap-4 pt-4">
-            {currentStep > 1 && (
-              <button
-                onClick={handleBack}
-                className="px-6 py-3 rounded-lg font-bold border-2 transition-all duration-300 hover:opacity-80"
-                style={{
-                  borderColor: 'var(--borderColor)',
-                  color: 'var(--textPrimary)',
-                }}
-              >
-                ← Back
-              </button>
-            )}
-            
-            {currentStep < 4 ? (
-              <button
-                onClick={handleNext}
-                className="flex-1 px-6 py-3 rounded-lg font-bold transition-all duration-300 hover:scale-105"
-                style={{
-                  background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
-                  color: '#FFFFFF',
-                }}
-              >
-                Next →
-              </button>
-            ) : (
-              <button
-                onClick={handleSubmit}
-                disabled={loading}
-                className="flex-1 px-6 py-3 rounded-lg font-bold transition-all duration-300 hover:scale-105"
-                style={{
-                  background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
-                  color: '#FFFFFF',
-                  opacity: loading ? 0.7 : 1,
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {loading ? 'Saving your profile...' : "Let's Go! 🚀"}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-</file>
-
 <file path="lib/supabaseClient.ts">
 import { createClient } from '@supabase/supabase-js'
 
@@ -2428,37 +3900,6 @@ export const createServerClient = () => {
       autoRefreshToken: false,
     },
   })
-}
-</file>
-
-<file path="package.json">
-{
-  "name": "apex-fitness-coach-v2",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
-  "dependencies": {
-    "@supabase/supabase-js": "^2.87.1",
-    "dotenv": "^17.2.3",
-    "next": "16.0.10",
-    "react": "19.2.1",
-    "react-dom": "19.2.1"
-  },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.0.10",
-    "tailwindcss": "^4",
-    "typescript": "^5"
-  }
 }
 </file>
 
@@ -2731,6 +4172,1742 @@ export default function RootLayout({
         </ThemeProvider>
       </body>
     </html>
+  )
+}
+</file>
+
+<file path="package.json">
+{
+  "name": "apex-fitness-coach-v2",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.2",
+    "@supabase/supabase-js": "^2.87.1",
+    "dotenv": "^17.2.3",
+    "next": "16.0.10",
+    "react": "19.2.1",
+    "react-dom": "19.2.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.0.10",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
+</file>
+
+<file path="app/dashboard/page.tsx">
+'use client'
+
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { useAuth } from '@/components/AuthProvider'
+import { useTheme } from '@/components/ThemeProvider'
+import { ThemeSwitcher } from '@/components/ThemeSwitcher'
+import { supabaseBrowser } from '@/lib/supabaseClient'
+
+// XP System - RPG-style exponential curve
+function getXPForLevel(level: number): number {
+  return Math.floor(100 * Math.pow(level, 1.5))
+}
+
+function getXPProgress(totalXP: number, currentLevel: number) {
+  // Calculate total XP needed for current level
+  let totalNeeded = 0
+  for (let i = 1; i < currentLevel; i++) {
+    totalNeeded += getXPForLevel(i)
+  }
+  
+  const xpIntoCurrentLevel = totalXP - totalNeeded
+  const xpNeededForNextLevel = getXPForLevel(currentLevel)
+  const percentToNext = Math.floor((xpIntoCurrentLevel / xpNeededForNextLevel) * 100)
+  
+  return {
+    current: xpIntoCurrentLevel,
+    needed: xpNeededForNextLevel,
+    percent: percentToNext,
+    remaining: xpNeededForNextLevel - xpIntoCurrentLevel
+  }
+}
+
+export default function DashboardPage() {
+  const { user, loading: authLoading, signOut } = useAuth()
+  const { themeConfig } = useTheme()
+  const router = useRouter()
+
+  const [profile, setProfile] = useState<any>(null)
+  const [activePlan, setActivePlan] = useState<any>(null)
+  const [userStats, setUserStats] = useState<any>(null)
+  const [recentBadges, setRecentBadges] = useState<any[]>([])
+  const [currentWeekProgress, setCurrentWeekProgress] = useState<any>(null)
+  
+  const [loadingProfile, setLoadingProfile] = useState(true)
+  const [loadingPlan, setLoadingPlan] = useState(true)
+  const [loadingStats, setLoadingStats] = useState(true)
+  const [generatingPlan, setGeneratingPlan] = useState(false)
+  const [initializingStats, setInitializingStats] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [latestPlan, setLatestPlan] = useState<any>(null)
+
+  // Redirect if not logged in
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push('/login')
+    }
+  }, [user, authLoading, router])
+
+  // Fetch user profile
+  useEffect(() => {
+    async function fetchProfile() {
+      if (!user) return
+
+      try {
+        const { data, error } = await supabaseBrowser
+          .from('user_profiles')
+          .select('*')
+          .eq('user_id', user.id)
+          .single()
+
+        if (error && error.code !== 'PGRST116') {
+          console.error('Error fetching profile:', error)
+          return
+        }
+        setProfile(data)
+      } finally {
+        setLoadingProfile(false)
+      }
+    }
+
+    fetchProfile()
+  }, [user])
+
+  // Fetch active plan
+  useEffect(() => {
+    async function fetchPlan() {
+      if (!user) return
+
+      try {
+        const { data, error } = await supabaseBrowser
+          .from('user_plans')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('status', 'active')
+          .single()
+
+        if (error && error.code !== 'PGRST116') {
+          throw error
+        }
+        setActivePlan(data)
+      } catch (err: any) {
+        console.error('Error fetching plan:', err)
+      } finally {
+        setLoadingPlan(false)
+      }
+    }
+
+    fetchPlan()
+  }, [user])
+
+  // Fetch user stats, badges, and progress
+  useEffect(() => {
+    async function fetchGameData() {
+      if (!user) return
+
+      try {
+        // Fetch user stats
+        const { data: stats } = await supabaseBrowser
+          .from('user_stats')
+          .select('*')
+          .eq('user_id', user.id)
+          .single()
+
+        setUserStats(stats)
+
+        // Fetch recent badges (last 3)
+        const { data: badges } = await supabaseBrowser
+          .from('user_badges')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('unlocked_at', { ascending: false })
+          .limit(3)
+
+        setRecentBadges(badges || [])
+
+        // Fetch current week progress
+        if (stats) {
+          const { data: weekProgress } = await supabaseBrowser
+            .from('user_progress')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('week_number', stats.current_week)
+            .single()
+
+          setCurrentWeekProgress(weekProgress)
+        }
+
+      } catch (err: any) {
+        console.error('Error fetching game data:', err)
+      } finally {
+        setLoadingStats(false)
+      }
+    }
+
+    fetchGameData()
+  }, [user])
+
+  // Initialize stats if they don't exist
+  const handleInitializeStats = async () => {
+    setInitializingStats(true)
+    setError(null)
+
+    try {
+      const { data: { session } } = await supabaseBrowser.auth.getSession()
+      
+      if (!session) {
+        setError('Please log in again')
+        return
+      }
+
+      const response = await fetch('/api/initialize-stats', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to initialize stats')
+      }
+
+      // Refresh stats
+      setUserStats(result.stats)
+      if (result.firstBadge) {
+        setRecentBadges([result.firstBadge])
+      }
+      if (result.weekProgress) {
+        setCurrentWeekProgress(result.weekProgress)
+      }
+
+    } catch (err: any) {
+      console.error('Initialization error:', err)
+      setError(err.message || 'Failed to initialize stats')
+    } finally {
+      setInitializingStats(false)
+    }
+  }
+
+  // Generate plan - FIXED VERSION
+  const handleGeneratePlan = async () => {
+    setGeneratingPlan(true)
+    setError(null)
+
+    try {
+      console.log('🤖 Starting plan generation...')
+      
+      const { data: { session }, error: sessionError } = await supabaseBrowser.auth.getSession()
+      
+      if (sessionError || !session) {
+        setError('Please log in again to generate a plan')
+        setGeneratingPlan(false)
+        return
+      }
+
+      console.log('✅ Session valid')
+
+      // Check we have profile data
+      if (!profile) {
+        setError('Please complete your profile first')
+        setGeneratingPlan(false)
+        return
+      }
+
+      console.log('✅ Profile data ready, calling API...')
+
+      // FIXED: Send profile data in the request body
+      const response = await fetch('/api/generate-plan', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          profile: profile,        // ← THE FIX IS HERE
+          currentPhotos: [],
+          goalPhotos: []
+        })
+      })
+
+      console.log('📡 Response status:', response.status)
+
+      // Check if response is JSON before parsing
+      const contentType = response.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        const textResponse = await response.text()
+        console.error('Non-JSON response:', textResponse)
+        throw new Error('Server error - check console for details')
+      }
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || result.details || 'Failed to generate plan')
+      }
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to generate plan')
+      }
+
+      console.log('✅ Plan generated successfully!')
+      
+      // Refresh the active plan from database
+      const { data: savedPlan } = await supabaseBrowser
+        .from('user_plans')
+        .select('*')
+        .eq('user_id', user?.id)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+      
+      if (savedPlan) {
+        setActivePlan(savedPlan)
+      }
+
+      alert('✅ Plan generated successfully! Check the stats above.')
+
+    } catch (err: any) {
+      console.error('❌ Plan generation error:', err)
+      setError(err.message || 'Failed to generate plan')
+      alert('❌ Error: ' + err.message)
+    } finally {
+      setGeneratingPlan(false)
+    }
+  }
+
+  // Show loading
+  if (authLoading) {
+    return (
+      <div 
+        className="min-h-screen flex items-center justify-center"
+        style={{ background: 'var(--bgPrimary)' }}
+      >
+        <div style={{ color: 'var(--textPrimary)' }}>
+          Loading...
+        </div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return null
+  }
+
+  return (
+    <div 
+      className="min-h-screen p-4 md:p-8 transition-all duration-500"
+      style={{ background: 'var(--bgPrimary)' }}
+    >
+      <div className="max-w-7xl mx-auto space-y-6">
+        
+        {/* Header */}
+        <div className="flex justify-between items-start">
+          <div>
+            <h1 
+              className="text-3xl md:text-4xl font-bold mb-2"
+              style={{
+                backgroundImage: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+              }}
+            >
+              {profile?.full_name ? `Welcome, ${profile.full_name}!` : 'Welcome to Your Dashboard'}
+            </h1>
+            <p style={{ color: 'var(--textSecondary)' }}>
+              {user.email}
+            </p>
+          </div>
+
+          <button
+            onClick={signOut}
+            className="px-4 md:px-6 py-2 md:py-3 rounded-lg font-bold transition-all duration-300 hover:opacity-80"
+            style={{
+              backgroundImage: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+              color: '#FFFFFF',
+            }}
+          >
+            Sign Out
+          </button>
+        </div>
+
+        {/* XP & Level Display */}
+        {!loadingStats && userStats && (
+          <div
+            className="themed-card p-6 border-2"
+            style={{
+              backgroundColor: 'var(--bgCard)',
+              borderColor: 'var(--borderColor)',
+            }}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <div className="text-3xl font-black" style={{ color: 'var(--textPrimary)' }}>
+                  Level {userStats.level}
+                </div>
+                <div className="text-sm" style={{ color: 'var(--textSecondary)' }}>
+                  {getXPProgress(userStats.total_xp, userStats.level).remaining} XP to Level {userStats.level + 1}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-sm font-semibold" style={{ color: 'var(--accent2)' }}>
+                  Total XP
+                </div>
+                <div className="text-2xl font-bold" style={{ color: 'var(--accent1)' }}>
+                  {userStats.total_xp.toLocaleString()}
+                </div>
+              </div>
+            </div>
+            
+            {/* XP Progress Bar */}
+            <div className="relative h-8 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--bgSecondary)' }}>
+              <div 
+                className="absolute inset-0 transition-all duration-500"
+                style={{
+                  width: `${getXPProgress(userStats.total_xp, userStats.level).percent}%`,
+                  backgroundImage: `linear-gradient(90deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+                }}
+              />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-sm font-bold" style={{ 
+                  color: getXPProgress(userStats.total_xp, userStats.level).percent > 50 ? '#FFFFFF' : 'var(--textPrimary)',
+                  textShadow: '0 1px 2px rgba(0,0,0,0.3)'
+                }}>
+                  {getXPProgress(userStats.total_xp, userStats.level).current.toLocaleString()} / {getXPProgress(userStats.total_xp, userStats.level).needed.toLocaleString()} XP
+                </span>
+              </div>
+            </div>
+            
+            <div className="text-xs text-center mt-2" style={{ color: 'var(--textSecondary)' }}>
+              {getXPProgress(userStats.total_xp, userStats.level).percent}% to next level
+            </div>
+          </div>
+        )}
+
+        {/* X% Better Hero Metric */}
+        {!loadingStats && userStats && currentWeekProgress && (
+          <div
+            className="themed-card p-8 md:p-12 border-2 text-center relative overflow-hidden"
+            style={{
+              backgroundColor: 'var(--bgCard)',
+              borderColor: 'var(--accent1)',
+            }}
+          >
+            <div className="text-sm font-semibold mb-2" style={{ color: 'var(--textSecondary)' }}>
+              This Week's Progress
+            </div>
+            <div 
+              className="text-6xl md:text-8xl font-black mb-4"
+              style={{
+                backgroundImage: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2}, ${themeConfig.colors.accent3})`,
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                backgroundClip: 'text',
+                filter: 'drop-shadow(0 0 20px rgba(255,255,255,0.3))',
+              }}
+            >
+              {currentWeekProgress.x_percent_better || 0}%
+            </div>
+            <div className="text-xl md:text-2xl font-bold" style={{ color: 'var(--textPrimary)' }}>
+              Better Than Last Week!
+            </div>
+            <div className="mt-4 text-sm" style={{ color: 'var(--textSecondary)' }}>
+              Keep showing up - every workout counts! 💪
+            </div>
+          </div>
+        )}
+
+        {/* Initialize Stats Button (if no stats) */}
+        {!loadingStats && !userStats && activePlan && (
+          <div
+            className="themed-card p-8 border-2 text-center"
+            style={{
+              backgroundColor: 'var(--bgCard)',
+              borderColor: 'var(--borderColor)',
+            }}
+          >
+            <div className="text-4xl mb-4">🎮</div>
+            <h3 className="text-2xl font-bold mb-4" style={{ color: 'var(--textPrimary)' }}>
+              Ready to Start Tracking?
+            </h3>
+            <p className="mb-6" style={{ color: 'var(--textSecondary)' }}>
+              Initialize your progress tracking and earn your first badge!
+            </p>
+            <button
+              onClick={handleInitializeStats}
+              disabled={initializingStats}
+              className="px-8 py-4 rounded-lg font-bold text-lg transition-all duration-300 hover:scale-105 disabled:opacity-50"
+              style={{
+                backgroundImage: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+                color: '#FFFFFF',
+              }}
+            >
+              {initializingStats ? 'Starting...' : 'Start Tracking Progress 🚀'}
+            </button>
+          </div>
+        )}
+
+        {/* Badges Section */}
+        {!loadingStats && recentBadges.length > 0 && (
+          <div
+            className="themed-card p-6 border-2"
+            style={{
+              backgroundColor: 'var(--bgCard)',
+              borderColor: 'var(--borderColor)',
+            }}
+          >
+            <h3 className="text-xl font-bold mb-4 flex items-center gap-2" style={{ color: 'var(--textPrimary)' }}>
+              <span>🏆</span> Recent Badges
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {recentBadges.map((badge) => (
+                <div
+                  key={badge.id}
+                  className="p-4 rounded-lg border-2 text-center transition-all duration-300 hover:scale-105"
+                  style={{
+                    backgroundColor: 'var(--bgSecondary)',
+                    borderColor: 'var(--accent1)',
+                  }}
+                >
+                  <div className="text-4xl mb-2">🏅</div>
+                  <div className="font-bold mb-1" style={{ color: 'var(--accent1)' }}>
+                    {badge.badge_name}
+                  </div>
+                  <div className="text-sm" style={{ color: 'var(--textSecondary)' }}>
+                    {badge.badge_description}
+                  </div>
+                  <div className="text-xs mt-2" style={{ color: 'var(--accent2)' }}>
+                    +{badge.xp_earned} XP
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Generate Plan Section OR Onboarding Prompt */}
+        {!loadingProfile && (
+          <>
+            {profile ? (
+              <div
+                className="themed-card p-6 md:p-8 border-2"
+                style={{
+                  backgroundColor: 'var(--bgCard)',
+                  borderColor: 'var(--borderColor)',
+                }}
+              >
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+                  <div>
+                    <h3 
+                      className="text-2xl font-bold mb-2"
+                      style={{ color: 'var(--accent1)' }}
+                    >
+                      {activePlan ? '🎯 Your Fitness Plan' : '🚀 Ready to Start?'}
+                    </h3>
+                    <p style={{ color: 'var(--textSecondary)' }}>
+                      {activePlan 
+                        ? `Plan created ${new Date(activePlan.created_at).toLocaleDateString()}`
+                        : 'Generate your personalized AI-powered fitness plan'
+                      }
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={handleGeneratePlan}
+                    disabled={generatingPlan}
+                    className="px-6 py-3 rounded-lg font-bold transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                    style={{
+                      backgroundImage: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+                      color: '#FFFFFF',
+                    }}
+                  >
+                    {generatingPlan ? (
+                      <span className="flex items-center gap-2">
+                        <span className="animate-spin">⚙️</span>
+                        Generating...
+                      </span>
+                    ) : activePlan ? (
+                      'Regenerate Plan'
+                    ) : (
+                      'Generate My Plan'
+                    )}
+                  </button>
+
+                  {activePlan && (
+                    <button
+                      onClick={() => router.push('/plan')}
+                      className="px-6 py-3 rounded-lg font-bold transition-all duration-300 hover:opacity-80"
+                      style={{
+                        background: `linear-gradient(135deg, ${themeConfig.colors.accent2}, ${themeConfig.colors.accent3})`,
+                        color: '#FFFFFF',
+                      }}
+                    >
+                      📋 View My Plan
+                    </button>
+                  )}
+                </div>
+
+                {error && (
+                  <div 
+                    className="p-4 rounded-lg border-2 mb-4"
+                    style={{
+                      backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                      borderColor: '#EF4444',
+                      color: '#EF4444',
+                    }}
+                  >
+                    {error}
+                  </div>
+                )}
+
+                {loadingPlan ? (
+                  <div style={{ color: 'var(--textSecondary)' }}>
+                    Loading plan...
+                  </div>
+                ) : activePlan ? (
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div 
+                        className="p-4 rounded-lg"
+                        style={{ backgroundColor: 'var(--bgSecondary)' }}
+                      >
+                        <div className="text-sm" style={{ color: 'var(--textSecondary)' }}>
+                          Time to Goal
+                        </div>
+                        <div className="text-2xl font-bold" style={{ color: 'var(--accent1)' }}>
+                          {activePlan.plan_json.time_to_goal?.estimate_weeks_range?.min || 'N/A'}-
+                          {activePlan.plan_json.time_to_goal?.estimate_weeks_range?.max || 'N/A'} weeks
+                        </div>
+                      </div>
+
+                      <div 
+                        className="p-4 rounded-lg"
+                        style={{ backgroundColor: 'var(--bgSecondary)' }}
+                      >
+                        <div className="text-sm" style={{ color: 'var(--textSecondary)' }}>
+                          Workouts/Week
+                        </div>
+                        <div className="text-2xl font-bold" style={{ color: 'var(--accent2)' }}>
+                          {activePlan.plan_json.weekly_plan?.days_per_week || 'N/A'} days
+                        </div>
+                      </div>
+
+                      <div 
+                        className="p-4 rounded-lg"
+                        style={{ backgroundColor: 'var(--bgSecondary)' }}
+                      >
+                        <div className="text-sm" style={{ color: 'var(--textSecondary)' }}>
+                          Daily Calories
+                        </div>
+                        <div className="text-2xl font-bold" style={{ color: 'var(--accent3)' }}>
+                          {activePlan.plan_json.nutrition?.calorie_target_range?.min || 'N/A'}-
+                          {activePlan.plan_json.nutrition?.calorie_target_range?.max || 'N/A'}
+                        </div>
+                      </div>
+
+                      <div 
+                        className="p-4 rounded-lg"
+                        style={{ backgroundColor: 'var(--bgSecondary)' }}
+                      >
+                        <div className="text-sm" style={{ color: 'var(--textSecondary)' }}>
+                          Daily Steps
+                        </div>
+                        <div className="text-2xl font-bold" style={{ color: 'var(--accent4)' }}>
+                          {activePlan.plan_json.recovery_and_steps?.steps_target_range?.min || 'N/A'}-
+                          {activePlan.plan_json.recovery_and_steps?.steps_target_range?.max || 'N/A'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {activePlan.plan_json.disclaimer && (
+                      <div 
+                        className="p-4 rounded-lg border"
+                        style={{
+                          backgroundColor: 'var(--bgSecondary)',
+                          borderColor: 'var(--borderColor)',
+                          color: 'var(--textSecondary)',
+                        }}
+                      >
+                        <p className="text-sm">{activePlan.plan_json.disclaimer}</p>
+                      </div>
+                    )}
+
+                    <div 
+                      className="p-6 rounded-lg border-2"
+                      style={{
+                        backgroundColor: 'var(--bgSecondary)',
+                        borderColor: 'var(--accent1)',
+                      }}
+                    >
+                      <h4 className="font-bold mb-2" style={{ color: 'var(--accent1)' }}>
+                        📱 Full Plan Viewer Coming Soon
+                      </h4>
+                      <p style={{ color: 'var(--textSecondary)' }}>
+                        Your complete plan has been generated! We're building the full interface to display workouts, meals, milestones, and more. For now, you can see your quick stats above.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ color: 'var(--textSecondary)' }}>
+                    <p className="mb-2">Click "Generate My Plan" to create your personalized fitness plan.</p>
+                    <p className="text-sm">This uses AI to analyze your goals and create a complete workout, nutrition, and recovery plan.</p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div
+                className="themed-card p-12 border-2 text-center"
+                style={{
+                  backgroundColor: 'var(--bgCard)',
+                  borderColor: 'var(--borderColor)',
+                }}
+              >
+                <div className="text-6xl mb-6">👋</div>
+                <h2 
+                  className="text-3xl font-bold mb-4"
+                  style={{
+                    backgroundImage: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    backgroundClip: 'text',
+                  }}
+                >
+                  Let's Get You Started!
+                </h2>
+                <p className="text-lg mb-8" style={{ color: 'var(--textSecondary)' }}>
+                  Complete your profile so we can build your personalized fitness plan
+                </p>
+                <Link href="/onboarding">
+                  <button
+                    className="px-8 py-4 rounded-lg font-bold text-lg transition-all duration-300 hover:scale-105"
+                    style={{
+                      backgroundImage: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+                      color: '#FFFFFF',
+                    }}
+                  >
+                    Complete Your Profile →
+                  </button>
+                </Link>
+                <p className="text-sm mt-4" style={{ color: 'var(--textSecondary)' }}>
+                  Takes less than 2 minutes • 4 simple questions
+                </p>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Theme Switcher */}
+        <div className="space-y-4">
+          <h2 
+            className="text-2xl font-bold"
+            style={{ color: 'var(--textPrimary)' }}
+          >
+            Choose Your Theme
+          </h2>
+          <ThemeSwitcher />
+        </div>
+
+        {/* Profile Summary */}
+        {!loadingProfile && profile && (
+          <div
+            className="themed-card p-6 md:p-8 border-2"
+            style={{
+              backgroundColor: 'var(--bgCard)',
+              borderColor: 'var(--borderColor)',
+            }}
+          >
+            <div className="flex justify-between items-center mb-4">
+              <h3 
+                className="text-xl font-bold"
+                style={{ color: 'var(--textPrimary)' }}
+              >
+                Your Profile
+              </h3>
+              <div className="flex gap-2">
+                <Link href="/photos/upload">
+                  <button
+                    className="px-4 py-2 rounded-lg font-semibold text-sm border-2 transition-all duration-300 hover:scale-105"
+                    style={{
+                      borderColor: 'var(--borderColor)',
+                      color: 'var(--textPrimary)',
+                      backgroundColor: 'var(--bgSecondary)',
+                    }}
+                  >
+                    📸 Edit Photos
+                  </button>
+                </Link>
+                <Link href="/onboarding">
+                  <button
+                    className="px-4 py-2 rounded-lg font-semibold text-sm border-2 transition-all duration-300 hover:scale-105"
+                    style={{
+                      borderColor: 'var(--borderColor)',
+                      color: 'var(--textPrimary)',
+                      backgroundColor: 'var(--bgSecondary)',
+                    }}
+                  >
+                    ✏️ Edit Profile
+                  </button>
+                </Link>
+              </div>
+            </div>
+            <div className="grid md:grid-cols-2 gap-4" style={{ color: 'var(--textSecondary)' }}>
+              <div>
+                <p><strong style={{ color: 'var(--textPrimary)' }}>Age:</strong> {profile.age}</p>
+                <p><strong style={{ color: 'var(--textPrimary)' }}>Gender:</strong> {profile.gender}</p>
+                <p><strong style={{ color: 'var(--textPrimary)' }}>Experience:</strong> {profile.experience_level}</p>
+              </div>
+              <div>
+                <p><strong style={{ color: 'var(--textPrimary)' }}>Goal:</strong> {profile.fitness_goal}</p>
+                <p><strong style={{ color: 'var(--textPrimary)' }}>Frequency:</strong> {profile.workout_frequency}</p>
+                <p><strong style={{ color: 'var(--textPrimary)' }}>Location:</strong> {profile.training_location}</p>
+              </div>
+            </div>
+
+            {profile.training_location === 'commercial' && (
+              <div className="mt-4">
+                <p style={{ color: 'var(--textSecondary)' }}>
+                  <strong style={{ color: 'var(--textPrimary)' }}>Gym:</strong>{' '}
+                  {profile.gym_chain || profile.gym_custom_name || 'Not specified'}
+                </p>
+              </div>
+            )}
+
+            {profile.available_equipment && profile.available_equipment.length > 0 && (
+              <div className="mt-4">
+                <p className="mb-2" style={{ color: 'var(--textPrimary)' }}>
+                  <strong>Available Equipment:</strong>
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {profile.available_equipment.map((item: string, idx: number) => (
+                    <span 
+                      key={idx}
+                      className="px-3 py-1 rounded-full text-sm font-semibold"
+                      style={{
+                        backgroundColor: 'var(--accent1)',
+                        color: '#FFFFFF',
+                      }}
+                    >
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+      </div>
+    </div>
+  )
+}
+</file>
+
+<file path="app/onboarding/page.tsx">
+'use client'
+
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { useAuth } from '@/components/AuthProvider'
+import { useTheme } from '@/components/ThemeProvider'
+import { supabaseBrowser } from '@/lib/supabaseClient'
+
+type OnboardingStep = 1 | 2 | 3 | 4
+
+interface OnboardingData {
+  full_name: string
+  age: string
+  gender: string
+  fitness_goal: string
+  experience_level: string
+  training_location: string
+  gym_chain: string
+  gym_custom_name: string
+  available_equipment: string[]
+  workout_frequency: string
+}
+
+export default function OnboardingPage() {
+  const router = useRouter()
+  const { user } = useAuth()
+  const { themeConfig } = useTheme()
+  
+  const [currentStep, setCurrentStep] = useState<OnboardingStep>(1)
+  const [loading, setLoading] = useState(false)
+  const [initialLoading, setInitialLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [isEditing, setIsEditing] = useState(false)
+  
+  const [formData, setFormData] = useState<OnboardingData>({
+    full_name: '',
+    age: '',
+    gender: '',
+    fitness_goal: '',
+    experience_level: '',
+    training_location: '',
+    gym_chain: '',
+    gym_custom_name: '',
+    available_equipment: [],
+    workout_frequency: '',
+  })
+
+  // Vitals state
+  const [heightFeet, setHeightFeet] = useState('')
+  const [heightInches, setHeightInches] = useState('')
+  const [currentWeight, setCurrentWeight] = useState('')
+  const [goalWeight, setGoalWeight] = useState('')
+  const [weightUnit, setWeightUnit] = useState<'lbs' | 'kg'>('lbs')
+
+  // Load existing profile data if editing
+  useEffect(() => {
+    loadExistingProfile()
+  }, [user])
+
+  async function loadExistingProfile() {
+    if (!user) return
+
+    try {
+      const { data: profile, error } = await supabaseBrowser
+        .from('user_profiles')
+        .select('*')
+        .eq('user_id', user.id)
+        .single()
+
+      if (profile) {
+        setIsEditing(true)
+        
+        setFormData({
+          full_name: profile.full_name || '',
+          age: profile.age?.toString() || '',
+          gender: profile.gender || '',
+          fitness_goal: profile.fitness_goal || '',
+          experience_level: profile.experience_level || '',
+          training_location: profile.training_location || '',
+          gym_chain: profile.gym_chain || '',
+          gym_custom_name: profile.gym_custom_name || '',
+          available_equipment: profile.available_equipment || [],
+          workout_frequency: profile.workout_frequency || '',
+        })
+
+        setHeightFeet(profile.height_feet?.toString() || '')
+        setHeightInches(profile.height_inches?.toString() || '')
+        setCurrentWeight(profile.current_weight?.toString() || '')
+        setGoalWeight(profile.goal_weight?.toString() || '')
+        setWeightUnit(profile.weight_unit || 'lbs')
+      }
+    } catch (err) {
+      console.error('Error loading profile:', err)
+    } finally {
+      setInitialLoading(false)
+    }
+  }
+
+  const handleInputChange = (field: keyof OnboardingData, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }))
+  }
+
+  const handleEquipmentToggle = (equipment: string) => {
+    setFormData(prev => ({
+      ...prev,
+      available_equipment: prev.available_equipment.includes(equipment)
+        ? prev.available_equipment.filter(e => e !== equipment)
+        : [...prev.available_equipment, equipment]
+    }))
+  }
+
+  const handleNext = () => {
+    setError(null)
+    
+    if (currentStep === 1) {
+      if (!formData.full_name || !formData.age || !formData.gender) {
+        setError("Come on, don't leave us hanging! Fill in all the fields 😊")
+        return
+      }
+      if (parseInt(formData.age) < 13 || parseInt(formData.age) > 120) {
+        setError('That age seems... off. Give us a real number!')
+        return
+      }
+
+      if (!heightFeet || parseInt(heightFeet) < 4 || parseInt(heightFeet) > 7) {
+        setError('Please enter a valid height between 4-7 feet')
+        return
+      }
+      
+      const inches = parseInt(heightInches || '0')
+      if (inches < 0 || inches >= 12) {
+        setError('Inches must be between 0-11')
+        return
+      }
+      
+      if (!currentWeight || parseFloat(currentWeight) < 50) {
+        setError('Please enter a valid weight (minimum 50)')
+        return
+      }
+      
+      if (goalWeight && parseFloat(goalWeight) < 50) {
+        setError('Goal weight must be at least 50')
+        return
+      }
+    }
+    
+    if (currentStep === 2 && !formData.fitness_goal) {
+      setError('Pick one! What are we working towards? 💪')
+      return
+    }
+    
+    if (currentStep === 3 && !formData.experience_level) {
+      setError('No judgment! Where are you at right now?')
+      return
+    }
+    
+    if (currentStep < 4) {
+      setCurrentStep((currentStep + 1) as OnboardingStep)
+    }
+  }
+
+  const handleBack = () => {
+    if (currentStep > 1) {
+      setCurrentStep((currentStep - 1) as OnboardingStep)
+      setError(null)
+    }
+  }
+
+  const handleSubmit = async () => {
+    setLoading(true)
+    setError(null)
+
+    if (!formData.workout_frequency) {
+      setError('How many days can you commit? Pick one!')
+      setLoading(false)
+      return
+    }
+
+    if (!formData.training_location) {
+      setError('Where will you be training? Pick one!')
+      setLoading(false)
+      return
+    }
+
+    if (formData.training_location === 'commercial' && !formData.gym_chain && !formData.gym_custom_name) {
+      setError('Tell us which gym you go to!')
+      setLoading(false)
+      return
+    }
+
+    if (formData.training_location !== 'commercial' && formData.available_equipment.length === 0) {
+      setError('What equipment do you have access to? Pick at least one!')
+      setLoading(false)
+      return
+    }
+
+    try {
+      const heightCm = Math.round(
+        (parseInt(heightFeet) * 30.48) + (parseInt(heightInches || '0') * 2.54)
+      )
+
+      const profileData = {
+        user_id: user?.id,
+        full_name: formData.full_name,
+        age: parseInt(formData.age),
+        gender: formData.gender,
+        
+        height_feet: parseInt(heightFeet),
+        height_inches: parseInt(heightInches || '0'),
+        height_cm: heightCm,
+        current_weight: parseFloat(currentWeight),
+        goal_weight: goalWeight ? parseFloat(goalWeight) : null,
+        weight_unit: weightUnit,
+        
+        fitness_goal: formData.fitness_goal,
+        experience_level: formData.experience_level,
+        
+        training_location: formData.training_location,
+        gym_chain: formData.training_location === 'commercial' ? formData.gym_chain : null,
+        gym_custom_name: formData.training_location === 'commercial' ? formData.gym_custom_name : null,
+        
+        available_equipment: formData.training_location !== 'commercial' ? formData.available_equipment : [],
+        
+        workout_frequency: formData.workout_frequency,
+        has_completed_onboarding: true,
+        updated_at: new Date().toISOString()
+      }
+
+      const { error: dbError } = await supabaseBrowser
+        .from('user_profiles')
+        .upsert(profileData, {
+          onConflict: 'user_id'
+        })
+
+      if (dbError) {
+        console.error('Database error:', dbError)
+        throw dbError
+      }
+
+      router.push('/dashboard')
+    } catch (err: any) {
+      console.error('Submit error:', err)
+      setError(err.message || 'Failed to save profile')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // COMPREHENSIVE EQUIPMENT LIST - 31 items
+  const equipmentOptions = [
+    // Free Weights
+    { name: 'Dumbbells', emoji: '💪', category: 'Free Weights' },
+    { name: 'Barbell', emoji: '🏋️', category: 'Free Weights' },
+    { name: 'Kettlebells', emoji: '⚫', category: 'Free Weights' },
+    { name: 'Weight Plates', emoji: '⚙️', category: 'Free Weights' },
+    
+    // Benches
+    { name: 'Flat Bench', emoji: '🪑', category: 'Benches' },
+    { name: 'Adjustable Bench', emoji: '🛋️', category: 'Benches' },
+    
+    // Racks & All-in-One
+    { name: 'Squat Rack', emoji: '🦵', category: 'Racks' },
+    { name: 'Power Rack', emoji: '🏗️', category: 'Racks' },
+    { name: 'Smith Machine', emoji: '🔧', category: 'Machines' },
+    { name: 'All-in-One Home Gym', emoji: '🏛️', category: 'Machines' },
+    
+    // Cable Systems
+    { name: 'Cable Machine', emoji: '🔌', category: 'Cables' },
+    { name: 'Functional Trainer', emoji: '🎯', category: 'Cables' },
+    
+    // Bars & Bodyweight
+    { name: 'Pull-up Bar', emoji: '🔥', category: 'Bodyweight' },
+    { name: 'Dip Station', emoji: '💺', category: 'Bodyweight' },
+    
+    // Leg Machines
+    { name: 'Leg Extension Machine', emoji: '🦿', category: 'Leg Machines' },
+    { name: 'Leg Curl Machine', emoji: '🦵', category: 'Leg Machines' },
+    { name: 'Leg Press Machine', emoji: '🏋️‍♂️', category: 'Leg Machines' },
+    
+    // Specialty
+    { name: 'Landmine Attachment', emoji: '⛏️', category: 'Specialty' },
+    { name: 'Suspension Trainer (TRX)', emoji: '🪢', category: 'Specialty' },
+    { name: 'Resistance Bands', emoji: '🎗️', category: 'Specialty' },
+    { name: 'Battle Ropes', emoji: '🪢', category: 'Specialty' },
+    
+    // Cardio
+    { name: 'Walking Pad', emoji: '🚶', category: 'Cardio' },
+    { name: 'Treadmill', emoji: '🏃', category: 'Cardio' },
+    { name: 'Exercise Bike', emoji: '🚴', category: 'Cardio' },
+    { name: 'Rowing Machine', emoji: '🚣', category: 'Cardio' },
+    { name: 'Elliptical', emoji: '🎿', category: 'Cardio' },
+    
+    // Core/Accessories
+    { name: 'Ab Wheel', emoji: '⭕', category: 'Accessories' },
+    { name: 'Medicine Ball', emoji: '⚽', category: 'Accessories' },
+    { name: 'Foam Roller', emoji: '🌀', category: 'Accessories' },
+    
+    // No Equipment
+    { name: 'No Equipment', emoji: '🤸', category: 'Bodyweight' }
+  ]
+
+  const popularGyms = [
+    '24 Hour Fitness',
+    'Anytime Fitness',
+    'Crunch Fitness',
+    'Equinox',
+    'Gold\'s Gym',
+    'LA Fitness',
+    'Lifetime Fitness',
+    'Planet Fitness',
+    'Other (specify below)'
+  ]
+
+  if (initialLoading) {
+    return (
+      <div 
+        className="min-h-screen flex items-center justify-center"
+        style={{ background: 'var(--bgPrimary)' }}
+      >
+        <p style={{ color: 'var(--textPrimary)' }}>Loading...</p>
+      </div>
+    )
+  }
+
+  return (
+    <div 
+      className="min-h-screen flex items-center justify-center p-8 transition-all duration-500"
+      style={{ background: 'var(--bgPrimary)' }}
+    >
+      <div className="w-full max-w-2xl space-y-8">
+        
+        <div className="text-center space-y-2">
+          <h1 
+            className="text-4xl font-bold"
+            style={{
+              background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+            }}
+          >
+            {isEditing ? "Update Your Profile ✏️" : "Alright, let's get to know you! 👋"}
+          </h1>
+          <p style={{ color: 'var(--textSecondary)' }}>
+            {currentStep === 1 && "No judgment, just facts. We need the basics."}
+            {currentStep === 2 && "What's the one thing you want most? Pick your mission."}
+            {currentStep === 3 && "This helps us not kill you on Day 1 😅"}
+            {currentStep === 4 && "Where will you train and what do you have?"}
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex justify-between text-sm" style={{ color: 'var(--textSecondary)' }}>
+            <span>Step {currentStep} of 4</span>
+            <span>{currentStep * 25}% there!</span>
+          </div>
+          <div 
+            className="w-full h-2 rounded-full overflow-hidden"
+            style={{ backgroundColor: 'var(--bgSecondary)' }}
+          >
+            <div 
+              className="h-full transition-all duration-500"
+              style={{
+                width: `${currentStep * 25}%`,
+                background: `linear-gradient(90deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+              }}
+            />
+          </div>
+        </div>
+
+        <div
+          className="themed-card p-8 border-2 space-y-6"
+          style={{
+            backgroundColor: 'var(--bgCard)',
+            borderColor: 'var(--borderColor)',
+          }}
+        >
+          
+          {currentStep === 1 && (
+            <div className="space-y-6">
+              {/* NAME */}
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold" style={{ color: 'var(--textPrimary)' }}>
+                  What should we call you?
+                </label>
+                <input
+                  type="text"
+                  value={formData.full_name}
+                  onChange={(e) => handleInputChange('full_name', e.target.value)}
+                  className="w-full px-4 py-3 rounded-lg border-2 transition-all duration-300"
+                  style={{
+                    backgroundColor: 'var(--bgSecondary)',
+                    borderColor: 'var(--borderColor)',
+                    color: 'var(--textPrimary)',
+                  }}
+                  placeholder="Your actual name (we won't share it!)"
+                />
+              </div>
+
+              {/* AGE */}
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold" style={{ color: 'var(--textPrimary)' }}>
+                  How many trips around the sun?
+                </label>
+                <input
+                  type="number"
+                  value={formData.age}
+                  onChange={(e) => handleInputChange('age', e.target.value)}
+                  className="w-full px-4 py-3 rounded-lg border-2 transition-all duration-300"
+                  style={{
+                    backgroundColor: 'var(--bgSecondary)',
+                    borderColor: 'var(--borderColor)',
+                    color: 'var(--textPrimary)',
+                  }}
+                  placeholder="Be honest - your body knows 😉"
+                  min="13"
+                  max="120"
+                />
+              </div>
+
+              {/* GENDER */}
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold" style={{ color: 'var(--textPrimary)' }}>
+                  Gender (helps with workout recommendations)
+                </label>
+                <div className="grid grid-cols-3 gap-3">
+                  {['Male', 'Female', 'Other'].map((gender) => (
+                    <button
+                      key={gender}
+                      type="button"
+                      onClick={() => handleInputChange('gender', gender)}
+                      className="px-4 py-3 rounded-lg border-2 font-semibold transition-all duration-300 hover:scale-105"
+                      style={{
+                        backgroundColor: formData.gender === gender ? 'var(--accent1)' : 'var(--bgSecondary)',
+                        borderColor: formData.gender === gender ? 'var(--accent1)' : 'var(--borderColor)',
+                        color: formData.gender === gender ? '#FFFFFF' : 'var(--textPrimary)',
+                      }}
+                    >
+                      {gender}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* HEIGHT */}
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold" style={{ color: 'var(--textPrimary)' }}>
+                  Your Height 📏
+                </label>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <input
+                      type="number"
+                      placeholder="Feet"
+                      value={heightFeet}
+                      onChange={(e) => setHeightFeet(e.target.value)}
+                      min="4"
+                      max="7"
+                      className="w-full px-4 py-3 rounded-lg border-2"
+                      style={{
+                        backgroundColor: 'var(--bgSecondary)',
+                        borderColor: 'var(--borderColor)',
+                        color: 'var(--textPrimary)',
+                      }}
+                    />
+                    <p className="text-xs mt-1" style={{ color: 'var(--textSecondary)' }}>
+                      Feet (4-7)
+                    </p>
+                  </div>
+                  <div className="flex-1">
+                    <input
+                      type="number"
+                      placeholder="Inches"
+                      value={heightInches}
+                      onChange={(e) => setHeightInches(e.target.value)}
+                      min="0"
+                      max="11"
+                      className="w-full px-4 py-3 rounded-lg border-2"
+                      style={{
+                        backgroundColor: 'var(--bgSecondary)',
+                        borderColor: 'var(--borderColor)',
+                        color: 'var(--textPrimary)',
+                      }}
+                    />
+                    <p className="text-xs mt-1" style={{ color: 'var(--textSecondary)' }}>
+                      Inches (0-11)
+                    </p>
+                  </div>
+                </div>
+                <p className="text-xs" style={{ color: 'var(--textSecondary)' }}>
+                  Example: 5 feet, 10 inches = 5'10"
+                </p>
+              </div>
+
+              {/* CURRENT WEIGHT */}
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold" style={{ color: 'var(--textPrimary)' }}>
+                  Current Weight ⚖️
+                </label>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <input
+                      type="number"
+                      placeholder="Weight"
+                      value={currentWeight}
+                      onChange={(e) => setCurrentWeight(e.target.value)}
+                      step="0.1"
+                      min="50"
+                      className="w-full px-4 py-3 rounded-lg border-2"
+                      style={{
+                        backgroundColor: 'var(--bgSecondary)',
+                        borderColor: 'var(--borderColor)',
+                        color: 'var(--textPrimary)',
+                      }}
+                    />
+                  </div>
+                  <select 
+                    value={weightUnit} 
+                    onChange={(e) => setWeightUnit(e.target.value as 'lbs' | 'kg')}
+                    className="px-4 py-3 rounded-lg border-2"
+                    style={{
+                      backgroundColor: 'var(--bgSecondary)',
+                      borderColor: 'var(--borderColor)',
+                      color: 'var(--textPrimary)',
+                    }}
+                  >
+                    <option value="lbs">lbs</option>
+                    <option value="kg">kg</option>
+                  </select>
+                </div>
+                <p className="text-xs" style={{ color: 'var(--textSecondary)' }}>
+                  Be honest - this helps us create the best plan for you 🎯
+                </p>
+              </div>
+
+              {/* GOAL WEIGHT */}
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold" style={{ color: 'var(--textPrimary)' }}>
+                  Goal Weight (Optional)
+                </label>
+                <input
+                  type="number"
+                  placeholder="Target weight"
+                  value={goalWeight}
+                  onChange={(e) => setGoalWeight(e.target.value)}
+                  step="0.1"
+                  className="w-full px-4 py-3 rounded-lg border-2"
+                  style={{
+                    backgroundColor: 'var(--bgSecondary)',
+                    borderColor: 'var(--borderColor)',
+                    color: 'var(--textPrimary)',
+                  }}
+                />
+                <p className="text-xs" style={{ color: 'var(--textSecondary)' }}>
+                  💡 Leave blank if you're focusing on body composition, not the scale
+                </p>
+              </div>
+            </div>
+          )}
+
+          {currentStep === 2 && (
+            <div className="space-y-6">
+              <div className="grid gap-3">
+                {[
+                  { goal: 'Lose Weight', sub: 'Get lean, feel lighter, drop fat', emoji: '🔥' },
+                  { goal: 'Build Muscle', sub: 'Pack on size, look jacked, get swole', emoji: '💪' },
+                  { goal: 'Get Stronger', sub: 'Lift heavy, hit PRs, feel powerful', emoji: '⚡' },
+                  { goal: 'Improve Endurance', sub: "Run longer, don't get winded, beast mode", emoji: '🏃' },
+                  { goal: 'General Fitness', sub: 'Just be healthier and feel good overall', emoji: '✨' },
+                  { goal: 'Athletic Performance', sub: 'Compete, dominate, win at sports', emoji: '🏆' }
+                ].map((item) => (
+                  <button
+                    key={item.goal}
+                    type="button"
+                    onClick={() => handleInputChange('fitness_goal', item.goal)}
+                    className="px-6 py-4 rounded-lg border-2 text-left transition-all duration-300 hover:scale-102"
+                    style={{
+                      backgroundColor: formData.fitness_goal === item.goal ? 'var(--accent1)' : 'var(--bgSecondary)',
+                      borderColor: formData.fitness_goal === item.goal ? 'var(--accent1)' : 'var(--borderColor)',
+                      color: formData.fitness_goal === item.goal ? '#FFFFFF' : 'var(--textPrimary)',
+                    }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl">{item.emoji}</span>
+                      <div className="flex-1">
+                        <div className="font-bold">{item.goal}</div>
+                        <div 
+                          className="text-sm"
+                          style={{ 
+                            color: formData.fitness_goal === item.goal ? 'rgba(255,255,255,0.9)' : 'var(--textSecondary)' 
+                          }}
+                        >
+                          {item.sub}
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {currentStep === 3 && (
+            <div className="space-y-6">
+              <div className="grid gap-3">
+                {[
+                  { level: 'Beginner', desc: 'New to this, ready to learn', emoji: '🌱', sub: "(Don't worry - everyone starts here!)" },
+                  { level: 'Intermediate', desc: '1-2 years in, got the basics down', emoji: '💪', sub: "(You know what a burpee is and hate it)" },
+                  { level: 'Advanced', desc: '3+ years, you live this lifestyle', emoji: '🔥', sub: "(Gym is basically your second home)" },
+                  { level: 'Expert', desc: 'Coach/athlete level, you could teach this', emoji: '🏆', sub: "(People ask YOU for fitness advice)" }
+                ].map((item) => (
+                  <button
+                    key={item.level}
+                    type="button"
+                    onClick={() => handleInputChange('experience_level', item.level)}
+                    className="px-6 py-4 rounded-lg border-2 text-left transition-all duration-300 hover:scale-102"
+                    style={{
+                      backgroundColor: formData.experience_level === item.level ? 'var(--accent1)' : 'var(--bgSecondary)',
+                      borderColor: formData.experience_level === item.level ? 'var(--accent1)' : 'var(--borderColor)',
+                      color: formData.experience_level === item.level ? '#FFFFFF' : 'var(--textPrimary)',
+                    }}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="text-2xl">{item.emoji}</span>
+                      <div className="flex-1">
+                        <div className="font-bold text-lg">{item.level}</div>
+                        <div 
+                          className="text-sm mt-1"
+                          style={{ 
+                            color: formData.experience_level === item.level ? 'rgba(255,255,255,0.9)' : 'var(--textSecondary)' 
+                          }}
+                        >
+                          {item.desc}
+                        </div>
+                        <div 
+                          className="text-xs mt-1 italic"
+                          style={{ 
+                            color: formData.experience_level === item.level ? 'rgba(255,255,255,0.8)' : 'var(--textSecondary)' 
+                          }}
+                        >
+                          {item.sub}
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {currentStep === 4 && (
+            <div className="space-y-6">
+              
+              {/* TRAINING LOCATION */}
+              <div className="space-y-3">
+                <h3 className="text-xl font-bold" style={{ color: 'var(--textPrimary)' }}>
+                  Where will you train? 🏋️
+                </h3>
+                <div className="grid gap-3">
+                  {[
+                    { loc: 'commercial', name: 'Commercial Gym', sub: 'Full gym access (24 Hour, Planet Fitness, etc)', emoji: '🏢' },
+                    { loc: 'home', name: 'Home Gym', sub: 'Training at home with your equipment', emoji: '🏠' },
+                    { loc: 'outdoor', name: 'Outdoor/Park', sub: 'Parks, trails, outdoor spaces', emoji: '🌳' },
+                    { loc: 'minimal', name: 'Limited Space', sub: 'Apartment, dorm, small space', emoji: '📦' }
+                  ].map((item) => (
+                    <button
+                      key={item.loc}
+                      type="button"
+                      onClick={() => handleInputChange('training_location', item.loc)}
+                      className="px-6 py-3 rounded-lg border-2 text-left transition-all duration-300 hover:scale-102"
+                      style={{
+                        backgroundColor: formData.training_location === item.loc ? 'var(--accent1)' : 'var(--bgSecondary)',
+                        borderColor: formData.training_location === item.loc ? 'var(--accent1)' : 'var(--borderColor)',
+                        color: formData.training_location === item.loc ? '#FFFFFF' : 'var(--textPrimary)',
+                      }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-xl">{item.emoji}</span>
+                        <div className="flex-1">
+                          <div className="font-semibold">{item.name}</div>
+                          <div 
+                            className="text-sm"
+                            style={{ 
+                              color: formData.training_location === item.loc ? 'rgba(255,255,255,0.9)' : 'var(--textSecondary)' 
+                            }}
+                          >
+                            {item.sub}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* GYM CHAIN (if commercial) */}
+              {formData.training_location === 'commercial' && (
+                <div className="space-y-3">
+                  <h3 className="text-lg font-bold" style={{ color: 'var(--textPrimary)' }}>
+                    Which gym? 💼
+                  </h3>
+                  <select
+                    value={formData.gym_chain}
+                    onChange={(e) => handleInputChange('gym_chain', e.target.value)}
+                    className="w-full px-4 py-3 rounded-lg border-2"
+                    style={{
+                      backgroundColor: 'var(--bgSecondary)',
+                      borderColor: 'var(--borderColor)',
+                      color: 'var(--textPrimary)',
+                    }}
+                  >
+                    <option value="">Select your gym...</option>
+                    {popularGyms.map(gym => (
+                      <option key={gym} value={gym}>{gym}</option>
+                    ))}
+                  </select>
+                  
+                  {(formData.gym_chain === 'Other (specify below)' || formData.gym_chain === '') && (
+                    <input
+                      type="text"
+                      placeholder="Enter your gym name..."
+                      value={formData.gym_custom_name}
+                      onChange={(e) => handleInputChange('gym_custom_name', e.target.value)}
+                      className="w-full px-4 py-3 rounded-lg border-2"
+                      style={{
+                        backgroundColor: 'var(--bgSecondary)',
+                        borderColor: 'var(--borderColor)',
+                        color: 'var(--textPrimary)',
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+
+              {/* EQUIPMENT (if not commercial) */}
+              {formData.training_location !== 'commercial' && formData.training_location !== '' && (
+                <div className="space-y-4">
+                  <h3 className="text-lg font-bold" style={{ color: 'var(--textPrimary)' }}>
+                    What equipment do you have? 💪
+                  </h3>
+                  <p className="text-sm" style={{ color: 'var(--textSecondary)' }}>
+                    Pick all that apply - we have 31 options including Walking Pad, Smith Machines, Leg Machines, and more!
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-3 max-h-96 overflow-y-auto p-2">
+                    {equipmentOptions.map((item) => (
+                      <button
+                        key={item.name}
+                        type="button"
+                        onClick={() => handleEquipmentToggle(item.name)}
+                        className="px-4 py-3 rounded-lg border-2 font-semibold transition-all duration-300 hover:scale-105 text-left"
+                        style={{
+                          backgroundColor: formData.available_equipment.includes(item.name) ? 'var(--accent1)' : 'var(--bgSecondary)',
+                          borderColor: formData.available_equipment.includes(item.name) ? 'var(--accent1)' : 'var(--borderColor)',
+                          color: formData.available_equipment.includes(item.name) ? '#FFFFFF' : 'var(--textPrimary)',
+                        }}
+                      >
+                        <span className="mr-2">{item.emoji}</span>
+                        {item.name}
+                      </button>
+                    ))}
+                  </div>
+                  
+                  {formData.available_equipment.length > 0 && (
+                    <p className="text-sm" style={{ color: 'var(--accent1)' }}>
+                      ✓ Selected {formData.available_equipment.length} item(s)
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* WORKOUT FREQUENCY */}
+              <div className="space-y-3">
+                <div>
+                  <h3 
+                    className="text-xl font-bold"
+                    style={{ color: 'var(--textPrimary)' }}
+                  >
+                    How many days can you REALISTICALLY commit?
+                  </h3>
+                  <p className="text-sm mt-1" style={{ color: 'var(--textSecondary)' }}>
+                    Be honest - we'd rather you crush 3 days than skip 6!
+                  </p>
+                </div>
+
+                <div className="grid gap-3">
+                  {[
+                    { freq: '1-2 days per week', sub: 'Just starting or super busy', emoji: '🌱' },
+                    { freq: '3-4 days per week', sub: 'The sweet spot for most people', emoji: '💪' },
+                    { freq: '5-6 days per week', sub: 'You mean business', emoji: '🔥' },
+                    { freq: 'Every day', sub: 'Absolute savage mode', emoji: '🏆' }
+                  ].map((item) => (
+                    <button
+                      key={item.freq}
+                      type="button"
+                      onClick={() => handleInputChange('workout_frequency', item.freq)}
+                      className="px-6 py-3 rounded-lg border-2 text-left transition-all duration-300 hover:scale-102"
+                      style={{
+                        backgroundColor: formData.workout_frequency === item.freq ? 'var(--accent1)' : 'var(--bgSecondary)',
+                        borderColor: formData.workout_frequency === item.freq ? 'var(--accent1)' : 'var(--borderColor)',
+                        color: formData.workout_frequency === item.freq ? '#FFFFFF' : 'var(--textPrimary)',
+                      }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-xl">{item.emoji}</span>
+                        <div className="flex-1">
+                          <div className="font-semibold">{item.freq}</div>
+                          <div 
+                            className="text-sm"
+                            style={{ 
+                              color: formData.workout_frequency === item.freq ? 'rgba(255,255,255,0.9)' : 'var(--textSecondary)' 
+                            }}
+                          >
+                            {item.sub}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div 
+              className="p-4 rounded-lg border-2"
+              style={{
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                borderColor: '#EF4444',
+                color: '#EF4444',
+              }}
+            >
+              {error}
+            </div>
+          )}
+
+          <div className="flex gap-4 pt-4">
+            {currentStep > 1 && (
+              <button
+                onClick={handleBack}
+                className="px-6 py-3 rounded-lg font-bold border-2 transition-all duration-300 hover:opacity-80"
+                style={{
+                  borderColor: 'var(--borderColor)',
+                  color: 'var(--textPrimary)',
+                }}
+              >
+                ← Back
+              </button>
+            )}
+            
+            {currentStep < 4 ? (
+              <button
+                onClick={handleNext}
+                className="flex-1 px-6 py-3 rounded-lg font-bold transition-all duration-300 hover:scale-105"
+                style={{
+                  background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+                  color: '#FFFFFF',
+                }}
+              >
+                Next →
+              </button>
+            ) : (
+              <button
+                onClick={handleSubmit}
+                disabled={loading}
+                className="flex-1 px-6 py-3 rounded-lg font-bold transition-all duration-300 hover:scale-105"
+                style={{
+                  background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+                  color: '#FFFFFF',
+                  opacity: loading ? 0.7 : 1,
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {loading ? 'Saving your profile...' : isEditing ? "Update Profile 💾" : "Let's Go! 🚀"}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 </file>

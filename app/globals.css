@@ -62,39 +62,7 @@ body {
   }
 }
 
-/* Bee Theme - Honey Fill Animation */
-@keyframes honeyFill {
-  0% { 
-    transform: translateY(100%);
-    opacity: 0;
-  }
-  100% { 
-    transform: translateY(0%);
-    opacity: 1;
-  }
-}
 
-/* Bee Theme - Floating Pollen */
-@keyframes floatPollen {
-  0%, 100% { 
-    transform: translateY(0px) translateX(0px);
-    opacity: 0.6;
-  }
-  50% { 
-    transform: translateY(-20px) translateX(10px);
-    opacity: 1;
-  }
-}
-
-/* Bee Theme - Gentle Glow Pulse */
-@keyframes honeyGlow {
-  0%, 100% {
-    box-shadow: 0 0 10px rgba(255, 200, 61, 0.3);
-  }
-  50% {
-    box-shadow: 0 0 20px rgba(255, 200, 61, 0.5);
-  }
-}
 
 /* Hex grid pattern utility (for cyberpunk) */
 .hex-grid {
@@ -107,16 +75,133 @@ body {
   background-position: 0 0, 0 0, 40px 70px, 40px 70px;
 }
 
-/* Honeycomb pattern utility (for bee theme) */
-.honeycomb-grid {
+/* ========================================
+   BEE THEME - ENHANCED HONEYCOMB LUXURY
+   ======================================== */
+
+/* Matte Black Background with Honeycomb Pattern (not visible, shape needs work) */
+[data-theme="bee"] body,
+[data-theme="bee"] > div {
+  background: #171717 !important;
   background-image: 
-    linear-gradient(30deg, rgba(255, 200, 61, 0.15) 12%, transparent 12.5%, transparent 87%, rgba(255, 200, 61, 0.15) 87.5%),
-    linear-gradient(150deg, rgba(255, 200, 61, 0.15) 12%, transparent 12.5%, transparent 87%, rgba(255, 200, 61, 0.15) 87.5%),
-    linear-gradient(30deg, rgba(255, 200, 61, 0.15) 12%, transparent 12.5%, transparent 87%, rgba(255, 200, 61, 0.15) 87.5%),
-    linear-gradient(150deg, rgba(255, 200, 61, 0.15) 12%, transparent 12.5%, transparent 87%, rgba(255, 200, 61, 0.15) 87.5%);
-  background-size: 80px 140px;
-  background-position: 0 0, 0 0, 40px 70px, 40px 70px;
+    linear-gradient(30deg, rgba(255, 200, 61, 0.06) 12%, transparent 12.5%, transparent 87%, rgba(255, 200, 61, 0.06) 87.5%),
+    linear-gradient(150deg, rgba(255, 200, 61, 0.06) 12%, transparent 12.5%, transparent 87%, rgba(255, 200, 61, 0.06) 87.5%),
+    linear-gradient(30deg, rgba(255, 200, 61, 0.06) 12%, transparent 12.5%, transparent 87%, rgba(255, 200, 61, 0.06) 87.5%),
+    linear-gradient(150deg, rgba(255, 200, 61, 0.06) 12%, transparent 12.5%, transparent 87%, rgba(255, 200, 61, 0.06) 87.5%) !important;
+  background-size: 80px 140px !important;
+  background-position: 0 0, 0 0, 40px 70px, 40px 70px !important;
 }
+
+/* Force all cards to have honey glow */
+[data-theme="bee"] [class*="rounded"][class*="border"] {
+  box-shadow: 0 0 25px rgba(255, 200, 61, 0.25), 
+              inset 0 0 40px rgba(255, 200, 61, 0.08) !important;
+  animation: honeyPulse 4s ease-in-out infinite;
+  position: relative;
+}
+
+/* Honey Pulse Animation */
+@keyframes honeyPulse {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(255, 200, 61, 0.2), 
+                inset 0 0 30px rgba(255, 200, 61, 0.05);
+  }
+  50% {
+    box-shadow: 0 0 35px rgba(255, 200, 61, 0.4), 
+                inset 0 0 50px rgba(255, 200, 61, 0.12);
+  }
+}
+
+/* Hover effect for bee theme cards */
+[data-theme="bee"] [class*="rounded"][class*="border"]:hover {
+  box-shadow: 0 0 40px rgba(255, 200, 61, 0.5), 
+              inset 0 0 60px rgba(255, 200, 61, 0.15) !important;
+  transform: translateY(-3px);
+  transition: all 0.3s ease;
+}
+
+/* Subtle shine on cards */
+[data-theme="bee"] [class*="rounded"][class*="border"]::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40%;
+  background: linear-gradient(180deg, rgba(255, 200, 61, 0.08) 0%, transparent 100%);
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Make card content visible above the shine */
+[data-theme="bee"] [class*="rounded"][class*="border"] > * {
+  position: relative;
+  z-index: 2;
+}
+
+/* Floating pollen decoration */
+[data-theme="bee"] body::before {
+  content: '🌸';
+  position: fixed;
+  font-size: 16px;
+  opacity: 0.25;
+  animation: floatPollen 10s ease-in-out infinite;
+  pointer-events: none;
+  top: 15%;
+  left: 8%;
+  z-index: 1;
+}
+
+[data-theme="bee"] body::after {
+  content: '🌼';
+  position: fixed;
+  font-size: 14px;
+  opacity: 0.2;
+  animation: floatPollen 12s ease-in-out infinite reverse;
+  pointer-events: none;
+  top: 60%;
+  right: 12%;
+  z-index: 1;
+}
+
+@keyframes floatPollen {
+  0%, 100% { 
+    transform: translateY(0px) translateX(0px) rotate(0deg);
+    opacity: 0.15;
+  }
+  50% { 
+    transform: translateY(-40px) translateX(20px) rotate(180deg);
+    opacity: 0.35;
+  }
+}
+
+/* Royal purple glow for special accents */
+[data-theme="bee"] [style*="6B4EFF"],
+[data-theme="bee"] [style*="#6B4EFF"] {
+  box-shadow: 0 0 25px rgba(107, 78, 255, 0.5) !important;
+  animation: royalGlow 3s ease-in-out infinite;
+}
+
+@keyframes royalGlow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(107, 78, 255, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 35px rgba(107, 78, 255, 0.7);
+  }
+}
+
+/* Honey drip effect on thick borders */
+[data-theme="bee"] [class*="border-4"] {
+  border-image: linear-gradient(180deg, 
+    #FFC83D 0%, 
+    #FFB000 40%, 
+    #CC8800 100%) 1 !important;
+}
+
+/* END BEE THEME ENHANCEMENTS */
+
 
 /* Shape utilities based on theme */
 [data-shape="angular"] .themed-card {
