@@ -18,6 +18,7 @@ export default function PlanPage() {
   const [selectedDayIndex, setSelectedDayIndex] = useState(0)
   const [selectedDay, setSelectedDay] = useState<any>(null)
   const [completedExercises, setCompletedExercises] = useState<Set<number>>(new Set())
+  const [completedDays, setCompletedDays] = useState<Set<string>>(new Set())
   
   // Session tracking
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>('not_started')
@@ -28,7 +29,7 @@ export default function PlanPage() {
 
   const [loading, setLoading] = useState(true)
 
-  // Fetch active plan
+  // Fetch active plan and determine next uncompleted day
   useEffect(() => {
     async function fetchPlan() {
       if (!user?.id) return
@@ -46,7 +47,36 @@ export default function PlanPage() {
         setActivePlan(planData)
 
         if (planData?.plan_json?.weekly_plan?.schedule) {
-          setSelectedDay(planData.plan_json.weekly_plan.schedule[0])
+          // Fetch completed workout sessions for this week
+          const currentWeek = planData.current_week || 1
+          
+          const { data: completedSessions } = await supabaseBrowser
+            .from('workout_sessions')
+            .select('workout_day')
+            .eq('user_id', user.id)
+            .eq('plan_id', planData.id)
+            .eq('week_number', currentWeek)
+            .eq('status', 'completed')
+
+          // Build set of completed day labels
+          const completedSet = new Set(
+            completedSessions?.map(s => s.workout_day) || []
+          )
+          setCompletedDays(completedSet)
+
+          // Find the first uncompleted day
+          const schedule = planData.plan_json.weekly_plan.schedule
+          let nextDayIndex = 0
+          
+          for (let i = 0; i < schedule.length; i++) {
+            if (!completedSet.has(schedule[i].day_label)) {
+              nextDayIndex = i
+              break
+            }
+          }
+
+          setSelectedDayIndex(nextDayIndex)
+          setSelectedDay(schedule[nextDayIndex])
         }
       } catch (err) {
         console.error('Error fetching plan:', err)
@@ -148,7 +178,7 @@ export default function PlanPage() {
     setSessionStatus('in_progress')
   }
 
-  // Finish workout
+  // Finish workout with progression logic
   const handleFinishWorkout = async () => {
     if (!sessionId || !user?.id) return
 
@@ -180,7 +210,7 @@ export default function PlanPage() {
 
       const { data: stats } = await supabaseBrowser
         .from('user_stats')
-        .select('total_xp')
+        .select('total_xp, current_streak')
         .eq('user_id', user.id)
         .single()
 
@@ -194,16 +224,112 @@ export default function PlanPage() {
           .eq('user_id', user.id)
       }
 
+      // === PROGRESSION LOGIC ===
+      // Check if this was the last day of the week
+      const schedule = activePlan.plan_json.weekly_plan.schedule || []
+      const newCompletedDays = new Set(completedDays)
+      newCompletedDays.add(selectedDay.day_label)
+
+      // Count total workout days (non-rest days)
+      const totalWorkoutDays = schedule.filter((day: any) => 
+        day.workout && day.workout.length > 0
+      ).length
+
+      const completedWorkoutCount = Array.from(newCompletedDays).filter(dayLabel => {
+        const day = schedule.find((d: any) => d.day_label === dayLabel)
+        return day && day.workout && day.workout.length > 0
+      }).length
+
+      let progressionMessage = `Workout completed! 🎉\n\n${completionPercentage}% complete\n${totalMinutes} minutes\n~${estimatedCalories} calories burned\n+${xpEarned} XP earned!`
+
+      // Check if week is complete
+      if (completedWorkoutCount >= totalWorkoutDays) {
+        const currentWeek = activePlan.current_week || 1
+        const totalWeeks = activePlan.plan_json.weekly_plan?.program_length_weeks || 24
+        const milestones = activePlan.plan_json.milestones || []
+
+        // Find current milestone/phase
+        const currentMilestone = milestones.find((m: any) => 
+          currentWeek >= m.week_range.start && currentWeek <= m.week_range.end
+        )
+
+        const currentPhase = activePlan.current_phase || 1
+
+        // Check if milestone is complete
+        if (currentMilestone && currentWeek >= currentMilestone.week_range.end) {
+          // Milestone complete! Move to next milestone/phase
+          const currentMilestoneIndex = milestones.findIndex((m: any) => m === currentMilestone)
+          const nextMilestone = milestones[currentMilestoneIndex + 1]
+
+          if (nextMilestone) {
+            await supabaseBrowser
+              .from('user_plans')
+              .update({
+                current_week: currentWeek + 1,
+                current_phase: currentPhase + 1,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', activePlan.id)
+
+            progressionMessage += `\n\n🎊 PHASE COMPLETE! 🎊\nYou've finished ${currentMilestone.title}!\n\nStarting ${nextMilestone.title} next week!`
+          } else {
+            // Entire program complete!
+            progressionMessage += `\n\n🏆 PROGRAM COMPLETE! 🏆\nYou've finished the entire ${totalWeeks}-week program!\n\nTime to set new goals!`
+            
+            await supabaseBrowser
+              .from('user_plans')
+              .update({
+                status: 'archived',
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', activePlan.id)
+          }
+        } else {
+          // Week complete, but phase continues
+          await supabaseBrowser
+            .from('user_plans')
+            .update({
+              current_week: currentWeek + 1,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', activePlan.id)
+
+          const milestoneName = currentMilestone?.title || `Week ${currentWeek + 1}`
+          progressionMessage += `\n\n✅ Week ${currentWeek} Complete!\nMoving to Week ${currentWeek + 1} of ${milestoneName}!`
+        }
+      }
+
       // Reset state
       setSessionStatus('completed')
-      alert(`Workout completed! 🎉\n\n${completionPercentage}% complete\n${totalMinutes} minutes\n~${estimatedCalories} calories burned\n+${xpEarned} XP earned!`)
+      alert(progressionMessage)
 
-      // Redirect to dashboard
-      setTimeout(() => {
-        router.push('/dashboard')
-      }, 2000)
+      // Reload plan data to show next day
+      const { data: updatedPlan } = await supabaseBrowser
+        .from('user_plans')
+        .select('*')
+        .eq('id', activePlan.id)
+        .single()
+
+      if (updatedPlan) {
+        setActivePlan(updatedPlan)
+        setCompletedDays(newCompletedDays)
+        
+        // Find next uncompleted day
+        let nextDayIndex = 0
+        for (let i = 0; i < schedule.length; i++) {
+          if (!newCompletedDays.has(schedule[i].day_label)) {
+            nextDayIndex = i
+            break
+          }
+        }
+        
+        setSelectedDayIndex(nextDayIndex)
+        setCompletedExercises(new Set())
+      }
+
     } catch (err) {
       console.error('Error finishing workout:', err)
+      alert('Error completing workout. Please try again.')
     }
   }
 
@@ -229,76 +355,128 @@ export default function PlanPage() {
   }
 
   const schedule = activePlan.plan_json.weekly_plan.schedule || []
+  const currentWeek = activePlan.current_week || 1
+  const currentPhase = activePlan.current_phase || 1
+  const milestones = activePlan.plan_json.milestones || []
+  const totalWeeks = activePlan.plan_json.weekly_plan?.program_length_weeks || 24
+
+  // Find current milestone
+  const currentMilestone = milestones.find((m: any) => 
+    currentWeek >= m.week_range.start && currentWeek <= m.week_range.end
+  )
+  
+  const milestoneName = currentMilestone?.title || `Phase ${currentPhase}`
+  const milestoneDescription = currentMilestone?.focus?.join(', ') || ''
+  const milestoneWeekStart = currentMilestone?.week_range?.start || 1
+  const milestoneWeekEnd = currentMilestone?.week_range?.end || 4
+  const weekInMilestone = currentWeek - milestoneWeekStart + 1
+  const totalWeeksInMilestone = milestoneWeekEnd - milestoneWeekStart + 1
 
   return (
     <>
       <div className="min-h-screen pb-24" style={{ background: themeConfig.colors.bgPrimary }}>
         <div className="max-w-7xl mx-auto px-3 py-4 space-y-4">
           
-          {/* Header */}
-          <div className="flex justify-between items-center">
-            <h1 
-              className="text-2xl md:text-3xl font-black"
-              style={{
-                background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-              }}
-            >
-              Workout Plan
-            </h1>
-            <button
-              onClick={() => router.push('/dashboard')}
-              className="px-4 py-2 rounded-lg border-2 font-semibold text-sm transition-all"
-              style={{
-                borderColor: themeConfig.colors.borderColor,
-                color: themeConfig.colors.textPrimary,
-              }}
-            >
-              ← Back
-            </button>
+          {/* Phase & Week Header */}
+          <div className="space-y-2">
+            <div className="flex justify-between items-start">
+              <div className="flex-1">
+                <h1 
+                  className="text-2xl md:text-3xl font-black mb-1"
+                  style={{
+                    background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    backgroundClip: 'text',
+                  }}
+                >
+                  {milestoneName}
+                </h1>
+                <p className="text-xs md:text-sm mb-1" style={{ color: themeConfig.colors.textSecondary }}>
+                  {milestoneDescription}
+                </p>
+                <p className="text-xs md:text-sm font-semibold" style={{ color: themeConfig.colors.accent1 }}>
+                  Week {weekInMilestone} of {totalWeeksInMilestone} • Overall Week {currentWeek} of {totalWeeks}
+                </p>
+              </div>
+              <button
+                onClick={() => router.push('/dashboard')}
+                className="px-3 py-2 rounded-lg border-2 font-semibold text-xs md:text-sm transition-all"
+                style={{
+                  borderColor: themeConfig.colors.borderColor,
+                  color: themeConfig.colors.textPrimary,
+                }}
+              >
+                ← Back
+              </button>
+            </div>
+
+            {/* Phase Progress Bar */}
+            <div className="space-y-1">
+              <div 
+                className="w-full h-2 rounded-full overflow-hidden"
+                style={{ backgroundColor: themeConfig.colors.bgSecondary }}
+              >
+                <div 
+                  className="h-full transition-all duration-500"
+                  style={{
+                    width: `${(weekInMilestone / totalWeeksInMilestone) * 100}%`,
+                    background: `linear-gradient(90deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
+                  }}
+                />
+              </div>
+              <p className="text-xs text-right" style={{ color: themeConfig.colors.textSecondary }}>
+                {Math.floor((weekInMilestone / totalWeeksInMilestone) * 100)}% through {milestoneName}
+              </p>
+            </div>
           </div>
 
           {/* Day Selector Tabs */}
           <div className="overflow-x-auto pb-2 -mx-3 px-3">
             <div className="flex gap-2 min-w-max">
-              {schedule.map((day: any, index: number) => (
-                <button
-                  key={index}
-                  onClick={() => setSelectedDayIndex(index)}
-                  className="px-4 py-2 rounded-lg font-bold text-sm whitespace-nowrap transition-all border-2"
-                  style={{
-                    backgroundColor: selectedDayIndex === index ? themeConfig.colors.accent1 : themeConfig.colors.bgCard,
-                    borderColor: selectedDayIndex === index ? themeConfig.colors.accent1 : themeConfig.colors.borderColor,
-                    color: selectedDayIndex === index ? '#FFFFFF' : themeConfig.colors.textPrimary,
-                  }}
-                >
-                  {day.day_label}
-                </button>
-              ))}
+              {schedule.map((day: any, index: number) => {
+                const isCompleted = completedDays.has(day.day_label)
+                const isSelected = selectedDayIndex === index
+                
+                return (
+                  <button
+                    key={index}
+                    onClick={() => setSelectedDayIndex(index)}
+                    className="px-3 md:px-4 py-2 rounded-lg font-bold text-xs md:text-sm whitespace-nowrap transition-all border-2 relative"
+                    style={{
+                      backgroundColor: isSelected ? themeConfig.colors.accent1 : themeConfig.colors.bgCard,
+                      borderColor: isCompleted ? themeConfig.colors.accent2 : (isSelected ? themeConfig.colors.accent1 : themeConfig.colors.borderColor),
+                      color: isSelected ? '#FFFFFF' : themeConfig.colors.textPrimary,
+                      opacity: isCompleted ? 0.7 : 1,
+                    }}
+                  >
+                    {isCompleted && <span className="absolute -top-1 -right-1 text-xs">✓</span>}
+                    {day.day_label}
+                  </button>
+                )
+              })}
             </div>
           </div>
 
-          {/* Timer Display (when workout is active) */}
+          {/* Timer Display */}
           {sessionStatus !== 'not_started' && sessionStatus !== 'completed' && (
             <div 
-              className="p-6 rounded-xl border-4 text-center"
+              className="p-4 md:p-6 rounded-xl border-4 text-center"
               style={{
                 backgroundColor: themeConfig.colors.bgCard,
                 borderColor: themeConfig.colors.accent1,
               }}
             >
-              <div className="text-sm font-semibold mb-2" style={{ color: themeConfig.colors.textSecondary }}>
+              <div className="text-xs md:text-sm font-semibold mb-2" style={{ color: themeConfig.colors.textSecondary }}>
                 {sessionStatus === 'paused' ? '⏸️ PAUSED' : '⏱️ WORKOUT IN PROGRESS'}
               </div>
               <div 
-                className="text-6xl font-black mb-2"
+                className="text-4xl md:text-6xl font-black mb-2"
                 style={{ color: themeConfig.colors.accent1 }}
               >
                 {formatTime(elapsedSeconds)}
               </div>
-              <div className="text-sm" style={{ color: themeConfig.colors.textSecondary }}>
+              <div className="text-xs md:text-sm" style={{ color: themeConfig.colors.textSecondary }}>
                 {completedExercises.size} / {selectedDay.workout?.length || 0} exercises completed
               </div>
             </div>
@@ -306,24 +484,24 @@ export default function PlanPage() {
 
           {/* Workout Card */}
           <div 
-            className="p-6 rounded-xl border-4"
+            className="p-4 md:p-6 rounded-xl border-4"
             style={{
               backgroundColor: themeConfig.colors.bgCard,
               borderColor: themeConfig.colors.borderColor,
             }}
           >
             {/* Workout Header */}
-            <div className="mb-6">
+            <div className="mb-4 md:mb-6">
               <h2 
-                className="text-2xl font-black mb-2"
+                className="text-xl md:text-2xl font-black mb-2"
                 style={{ color: themeConfig.colors.accent1 }}
               >
                 {selectedDay.day_label}
               </h2>
-              <p className="text-sm mb-1" style={{ color: themeConfig.colors.textSecondary }}>
+              <p className="text-xs md:text-sm mb-1" style={{ color: themeConfig.colors.textSecondary }}>
                 {selectedDay.session_focus}
               </p>
-              <div className="flex gap-4 text-xs" style={{ color: themeConfig.colors.textSecondary }}>
+              <div className="flex gap-3 md:gap-4 text-xs" style={{ color: themeConfig.colors.textSecondary }}>
                 <span>🏋️ {selectedDay.workout?.length || 0} exercises</span>
                 <span>⏱️ ~{activePlan.plan_json.weekly_plan.session_length_minutes || 60} min</span>
               </div>
@@ -331,11 +509,11 @@ export default function PlanPage() {
 
             {/* Exercise List */}
             {selectedDay.workout && selectedDay.workout.length > 0 ? (
-              <div className="space-y-3 mb-6">
+              <div className="space-y-3 mb-4 md:mb-6">
                 {selectedDay.workout.map((exercise: any, index: number) => (
                   <div
                     key={index}
-                    className="flex items-start gap-3 p-4 rounded-lg border-2 transition-all"
+                    className="flex items-start gap-2 md:gap-3 p-3 md:p-4 rounded-lg border-2 transition-all"
                     style={{
                       backgroundColor: completedExercises.has(index) ? 'rgba(255, 255, 255, 0.05)' : 'transparent',
                       borderColor: completedExercises.has(index) ? themeConfig.colors.accent1 : themeConfig.colors.borderColor,
@@ -344,27 +522,27 @@ export default function PlanPage() {
                     {/* Checkbox */}
                     <button
                       onClick={() => toggleExercise(index)}
-                      className="flex-shrink-0 w-6 h-6 rounded border-2 flex items-center justify-center transition-all"
+                      className="flex-shrink-0 w-5 h-5 md:w-6 md:h-6 rounded border-2 flex items-center justify-center transition-all"
                       style={{
                         borderColor: themeConfig.colors.accent1,
                         backgroundColor: completedExercises.has(index) ? themeConfig.colors.accent1 : 'transparent',
                       }}
                     >
-                      {completedExercises.has(index) && <span className="text-white text-sm">✓</span>}
+                      {completedExercises.has(index) && <span className="text-white text-xs md:text-sm">✓</span>}
                     </button>
 
                     {/* Exercise Info */}
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <h4 
-                        className="font-bold mb-1"
+                        className="font-bold mb-1 text-sm md:text-base"
                         style={{ 
                           color: themeConfig.colors.textPrimary,
                           textDecoration: completedExercises.has(index) ? 'line-through' : 'none',
                         }}
                       >
-                        {exercise.name || exercise.exercise_name}
+                        {exercise.exercise}
                       </h4>
-                      <p className="text-sm" style={{ color: themeConfig.colors.textSecondary }}>
+                      <p className="text-xs md:text-sm" style={{ color: themeConfig.colors.textSecondary }}>
                         {exercise.sets} sets × {exercise.reps} reps
                         {exercise.rest_seconds && ` • ${exercise.rest_seconds}s rest`}
                       </p>
@@ -378,7 +556,7 @@ export default function PlanPage() {
                 ))}
               </div>
             ) : (
-              <p className="text-center py-8" style={{ color: themeConfig.colors.textSecondary }}>
+              <p className="text-center py-6 md:py-8 text-sm md:text-base" style={{ color: themeConfig.colors.textSecondary }}>
                 Rest day - No exercises scheduled
               </p>
             )}
@@ -389,7 +567,7 @@ export default function PlanPage() {
                 {sessionStatus === 'not_started' && (
                   <button
                     onClick={handleStartWorkout}
-                    className="w-full py-4 rounded-lg font-bold text-lg transition-all hover:scale-105"
+                    className="w-full py-3 md:py-4 rounded-lg font-bold text-base md:text-lg transition-all hover:scale-105"
                     style={{
                       background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
                       color: '#FFFFFF',
@@ -403,7 +581,7 @@ export default function PlanPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <button
                       onClick={handlePauseWorkout}
-                      className="py-3 rounded-lg font-bold border-2 transition-all"
+                      className="py-3 rounded-lg font-bold text-sm md:text-base border-2 transition-all"
                       style={{
                         borderColor: themeConfig.colors.borderColor,
                         color: themeConfig.colors.textPrimary,
@@ -413,7 +591,7 @@ export default function PlanPage() {
                     </button>
                     <button
                       onClick={handleFinishWorkout}
-                      className="py-3 rounded-lg font-bold transition-all"
+                      className="py-3 rounded-lg font-bold text-sm md:text-base transition-all"
                       style={{
                         background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
                         color: '#FFFFFF',
@@ -428,7 +606,7 @@ export default function PlanPage() {
                   <div className="grid grid-cols-2 gap-3">
                     <button
                       onClick={handleResumeWorkout}
-                      className="py-3 rounded-lg font-bold transition-all"
+                      className="py-3 rounded-lg font-bold text-sm md:text-base transition-all"
                       style={{
                         background: `linear-gradient(135deg, ${themeConfig.colors.accent1}, ${themeConfig.colors.accent2})`,
                         color: '#FFFFFF',
@@ -438,7 +616,7 @@ export default function PlanPage() {
                     </button>
                     <button
                       onClick={handleFinishWorkout}
-                      className="py-3 rounded-lg font-bold border-2 transition-all"
+                      className="py-3 rounded-lg font-bold text-sm md:text-base border-2 transition-all"
                       style={{
                         borderColor: themeConfig.colors.borderColor,
                         color: themeConfig.colors.textPrimary,
